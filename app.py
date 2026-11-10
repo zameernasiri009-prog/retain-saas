@@ -903,4 +903,45 @@ def billing_portal():
 # ==============================================================================
 if __name__ == '__main__':
     print("🚀 RetainSaaS Engine Running on http://127.0.0.1:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True) import stripe
+import os
+from flask import Flask, redirect, request, session, url_for
+
+# (Your existing app initialization...)
+
+
+@app.route("/oauth/callback")
+def stripe_oauth_callback():
+  # 1. Grab the authorization code sent back by Stripe
+  code = request.args.get("code")
+  error = request.args.get("error")
+
+  if error:
+    return f"Stripe authorization failed: {error}", 400
+
+  if not code:
+    return "No authorization code received from Stripe.", 400
+
+  try:
+    # 2. Exchange the code for an access token and connected account ID
+    stripe.api_key = os.environ.get(
+        "STRIPE_SECRET_KEY"
+    )  # Make sure this is in your Render env vars!
+
+    response = stripe.OAuth.token(
+        grant_type="authorization_code",
+        code=code,
+    )
+
+    connected_stripe_account_id = response.get("stripe_user_id")
+
+    # 3. Save this connected account ID to your database or session
+    # For now, we store it in session so the UI flips to green:
+    session["stripe_account_id"] = connected_stripe_account_id
+
+    # 4. Redirect the user back to your main dashboard
+    return redirect("/")
+
+  except Exception as e:
+    return f"An error occurred during token exchange: {str(e)}", 500
+
