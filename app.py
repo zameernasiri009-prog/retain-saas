@@ -1,25 +1,22 @@
 import os
 import secrets
-import hashlib
 import sqlite3
-import threading
-import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import wraps
 from flask import Flask, request, render_template_string, redirect, url_for, session, jsonify
 import stripe
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "retain_saas_ultra_secure_secret_key_999888777")
-app.config['SESSION_COOKIE_NAME'] = 'retainsaas_session'
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "revivepay_ultra_secure_secret_key_999888777")
+app.config['SESSION_COOKIE_NAME'] = 'revivepay_session'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=365)
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_mock_secret_key_123")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_mock_secret_123")
 stripe.api_key = STRIPE_SECRET_KEY
 
-DATABASE_FILE = "retainsaas_master_ultimate.db"
+DATABASE_FILE = "revivepay_master.db"
 
 def get_db():
     conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
@@ -36,18 +33,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
-            company_name TEXT DEFAULT 'My SaaS Product',
+            company_name TEXT DEFAULT 'My SaaS',
             plan_tier TEXT DEFAULT 'Scale Enterprise (Active)',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS login_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         );
         """)
         cursor.execute("""
@@ -95,25 +83,45 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Background Worker Thread for Automated Monitoring
-def background_dunning_worker():
-    while True:
-        try:
-            time.sleep(60)
-            with get_db() as conn:
-                # Automated health check or background task processing
-                pass
-        except Exception:
-            pass
-
-threading.Thread(target=background_dunning_worker, daemon=True).start()
-
+# --- PUBLIC LANDING PAGE ---
 @app.route('/')
 def index():
     if get_current_user():
         return redirect(url_for('dashboard'))
-    return redirect(url_for('login_page'))
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>RevivePay - Automated B2B SaaS Dunning & Revenue Recovery</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-950 text-white font-sans antialiased selection:bg-indigo-500 selection:text-white">
+        <nav class="border-b border-gray-900 px-6 py-4 flex justify-between items-center max-w-7xl mx-auto">
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-lg shadow-lg shadow-indigo-600/30">R</div>
+                <span class="font-black tracking-tight text-xl">RevivePay</span>
+            </div>
+            <div class="space-x-4">
+                <a href="/login" class="text-sm font-semibold text-gray-300 hover:text-white transition">Sign In</a>
+                <a href="/login" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 transition">Get Started</a>
+            </div>
+        </nav>
+        <header class="max-w-4xl mx-auto px-6 py-24 text-center space-y-8">
+            <div class="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/20 px-4 py-1.5 rounded-full text-indigo-400 text-xs font-bold uppercase tracking-wider">
+                <span>⚡ Automated Involuntary Churn Recovery</span>
+            </div>
+            <h1 class="text-5xl md:text-7xl font-black tracking-tight leading-none">Recover Failed Payments.<br><span class="text-indigo-500">Protect Your MRR.</span></h1>
+            <p class="text-gray-400 text-base md:text-lg max-w-2xl mx-auto font-medium">RevivePay automatically intercepts failed credit card charges, rescues expiring subscriptions, and puts thousands of dollars back into your bank account on autopilot.</p>
+            <div class="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+                <a href="/login" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition text-base">Launch Your Dashboard &rarr;</a>
+            </div>
+        </header>
+    </body>
+    </html>
+    """)
 
+# --- STREAMLINED SECURE LOGIN PAGE ---
 @app.route('/login', methods=['GET'])
 def login_page():
     if get_current_user():
@@ -122,24 +130,23 @@ def login_page():
     <!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Passwordless Login - RetainSaaS</title>
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Login - RevivePay</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
         <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
             <div class="text-center space-y-2">
-                <div class="inline-block bg-indigo-600 text-white font-extrabold px-4 py-1.5 rounded-xl text-sm mb-2">RetainSaaS Engine</div>
-                <h1 class="text-2xl font-black tracking-tight">Instant Magic Link</h1>
-                <p class="text-xs text-gray-400">Enter your email. No passwords required—log in instantly with a secure tap.</p>
+                <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
+                <h1 class="text-2xl font-black tracking-tight">Founder Portal</h1>
+                <p class="text-xs text-gray-400">Enter your email to instantly access your secure dashboard.</p>
             </div>
             <form action="/login" method="POST" class="space-y-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
                     <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
                 </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Send Secure Login Link</button>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Access Dashboard &rarr;</button>
             </form>
         </div>
     </body>
@@ -162,43 +169,12 @@ def login_post():
         else:
             user_id = user['id']
             
-        login_token = secrets.token_urlsafe(32)
-        expires = datetime.utcnow() + timedelta(minutes=15)
-        conn.execute("INSERT INTO login_tokens (user_id, token, expires_at) VALUES (?, ?, ?)", (user_id, login_token, expires))
-        conn.commit()
-        
-    magic_link = url_for('verify_login', token=login_token, _external=True)
-    
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl text-center space-y-4">
-            <h1 class="text-xl font-black">Magic Link Generated!</h1>
-            <p class="text-xs text-gray-400">Since you are testing on mobile, tap the direct secure login link below to enter your dashboard instantly without typing a password:</p>
-            <a href="{{ magic_link }}" class="block w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg">Tap Here to Log In Instantly &rarr;</a>
-        </div>
-    </body>
-    </html>
-    """, magic_link=magic_link)
-
-@app.route('/auth/verify/<token>')
-def verify_login(token):
-    with get_db() as conn:
-        record = conn.execute("SELECT * FROM login_tokens WHERE token = ?", (token,)).fetchone()
-        if not record:
-            return "Invalid or expired login link.", 400
-        
-        user_id = record['user_id']
-        conn.execute("DELETE FROM login_tokens WHERE token = ?", (token,))
-        conn.commit()
-        
     session.clear()
     session['user_id'] = user_id
     session.permanent = True
     return redirect(url_for('dashboard'))
 
+# --- FOUNDER DASHBOARD ---
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -216,15 +192,14 @@ def dashboard():
     <!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Dashboard - RetainSaaS Master</title>
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dashboard - RevivePay</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-gray-950 text-white font-sans min-h-screen flex flex-col">
         <nav class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center shadow-md">
             <div class="flex items-center space-x-3">
-                <div class="bg-indigo-600 text-white font-black px-3.5 py-1.5 rounded-xl text-sm shadow">RetainSaaS</div>
+                <div class="bg-indigo-600 text-white font-black px-3.5 py-1.5 rounded-xl text-sm shadow">RevivePay</div>
                 <span class="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full font-bold">{{ user.plan_tier }}</span>
             </div>
             <div class="flex items-center space-x-4 text-sm font-semibold">
@@ -249,7 +224,7 @@ def dashboard():
                     <h3 class="text-3xl font-black text-indigo-400 mt-2">{{ "%.1f"|format(recovery_rate) }}%</h3>
                 </div>
                 <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-lg">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Dunning Cases</p>
+                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Cases</p>
                     <h3 class="text-3xl font-black text-white mt-2">{{ total_count }}</h3>
                 </div>
             </div>
@@ -291,6 +266,7 @@ def dashboard():
     </html>
     """, user=user, events=events, at_risk_mrr=at_risk_mrr, recovered_mrr=recovered_mrr, recovery_rate=recovery_rate, total_count=total_count)
 
+# --- EMAIL TEMPLATES PAGE ---
 @app.route('/templates', methods=['GET', 'POST'])
 @login_required
 def templates_page():
@@ -310,10 +286,7 @@ def templates_page():
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
-    <head>
-        <meta charset="UTF-8"><title>Email Templates - RetainSaaS</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+    <head><meta charset="UTF-8"><title>Email Templates - RevivePay</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-950 text-white min-h-screen p-6">
         <div class="max-w-2xl mx-auto space-y-6">
             <div class="flex justify-between items-center"><h1 class="text-2xl font-black">Dunning Email Customizer</h1><a href="/dashboard" class="text-sm text-indigo-400 hover:underline">&larr; Dashboard</a></div>
@@ -385,21 +358,14 @@ def customer_update_page(token):
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Update Payment Method - Secure Portal</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+    <head><meta charset="UTF-8"><title>Update Payment - RevivePay</title><script src="https://cdn.tailwindcss.com"></script></head>
     <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
-            <div class="text-center space-y-2">
-                <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-1 rounded-full text-xs font-bold">Action Required</span>
-                <h1 class="text-xl font-black">Update Your Payment Method</h1>
-                <p class="text-xs text-gray-400">Your recent payment of <span class="text-white font-bold">${{ "%.2f"|format(event.amount_due_cents / 100.0) }}</span> failed. Update your card below to restore service instantly.</p>
-            </div>
-            <form action="/pay/{{ token }}" method="POST" class="space-y-4">
-                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-emerald-600/30 transition text-sm">Simulate Successful Card Update</button>
+        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6 text-center">
+            <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-1 rounded-full text-xs font-bold">Action Required</span>
+            <h1 class="text-xl font-black">Update Your Payment Method</h1>
+            <p class="text-xs text-gray-400">Your recent payment of <span class="text-white font-bold">${{ "%.2f"|format(event.amount_due_cents / 100.0) }}</span> failed. Update your card below to restore service instantly.</p>
+            <form action="/pay/{{ token }}" method="POST">
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg">Simulate Successful Card Update</button>
             </form>
         </div>
     </body>
@@ -433,3 +399,4 @@ def logout():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
