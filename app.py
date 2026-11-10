@@ -5,7 +5,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-secret-enterprise-key-change-in-production')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'enterprise-secure-master-key-2026')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///enterprise_portal.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -14,7 +14,7 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- DATABASE MODELS ---
+# --- DATABASE MODEL ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(150), unique=True, nullable=False)
@@ -30,8 +30,7 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return db.session.get(User, int(user_id))
 
-# --- HTML TEMPLATES (Embedded for standalone execution) ---
-
+# --- HTML TEMPLATES ---
 BASE_LAYOUT = """
 <!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-950">
@@ -41,19 +40,17 @@ BASE_LAYOUT = """
     <title>{% block title %}Enterprise Portal{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    </style>
+    <style>body { font-family: 'Plus Jakarta Sans', sans-serif; }</style>
 </head>
 <body class="h-full text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
-    <!-- Navigation Bar -->
-    <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-50">
+    <!-- Header Navbar -->
+    <header class="border-b border-slate-800/80 bg-slate-900/80 backdrop-blur-xl sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
             <a href="{{ url_for('index') }}" class="flex items-center gap-3 group">
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-105 transition-transform duration-300">
                     <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                 </div>
-                <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">VORTEX<span class="text-indigo-400">SECURE</span></span>
+                <span class="text-xl font-extrabold tracking-tight text-white">VORTEX<span class="text-indigo-400">SECURE</span></span>
             </a>
             <div class="flex items-center gap-4">
                 {% if current_user.is_authenticated %}
@@ -61,7 +58,7 @@ BASE_LAYOUT = """
                     <a href="{{ url_for('logout') }}" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all border border-slate-700/60 shadow-sm">Sign Out</a>
                 {% else %}
                     <a href="{{ url_for('login') }}" class="text-sm font-medium text-slate-300 hover:text-white transition-colors">Sign In</a>
-                    <a href="{{ url_for('register') }}" class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5">Get Started</a>
+                    <a href="{{ url_for('register') }}" class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all">Get Started</a>
                 {% endif %}
             </div>
         </div>
@@ -72,7 +69,7 @@ BASE_LAYOUT = """
         {% if messages %}
             <div class="max-w-xl mx-auto w-full px-6 mt-6">
                 {% for category, message in messages %}
-                    <div class="p-4 rounded-xl border {% if category == 'error' %}bg-rose-500/10 border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border-emerald-500/30 text-emerald-300{% endif %} text-sm font-medium shadow-lg animate-fade-in flex items-center justify-between">
+                    <div class="p-4 rounded-xl border {% if category == 'error' %}bg-rose-500/10 border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border-emerald-500/30 text-emerald-300{% endif %} text-sm font-medium shadow-lg flex items-center justify-between">
                         <span>{{ message }}</span>
                     </div>
                 {% endfor %}
@@ -98,46 +95,24 @@ INDEX_TEMPLATE = """
 {% block title %}VortexSecure - Next-Gen Enterprise Portal{% endblock %}
 {% block content %}
 <div class="relative overflow-hidden py-24 px-6 lg:px-8">
-    <!-- Glowing background effects -->
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
-    <div class="absolute top-1/4 right-10 w-[400px] h-[400px] bg-violet-600/10 rounded-full blur-3xl pointer-events-none"></div>
-
     <div class="max-w-4xl mx-auto text-center relative z-10">
-        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-8 shadow-inner">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-8">
             <span class="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span> Enterprise Security Grade 5.0
         </div>
         <h1 class="text-5xl sm:text-7xl font-extrabold tracking-tight text-white mb-8 leading-tight">
             The Ultimate <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Enterprise Gateway</span>
         </h1>
         <p class="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-12 font-light">
-            Engineered for high-scale organizations. Featuring permanent database tracking, bulletproof credential protection, and a multi-device ready interface that leaves everyone speechless.
+            Engineered for high-scale organizations with permanent SQLite database storage, bulletproof credential protection, and multi-device fluid readiness.
         </p>
         <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <a href="{{ url_for('register') }}" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold shadow-xl shadow-indigo-600/25 transition-all transform hover:-translate-y-0.5 text-center">
+            <a href="{{ url_for('register') }}" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold shadow-xl shadow-indigo-600/25 transition-all text-center">
                 Create Secure Account
             </a>
             <a href="{{ url_for('login') }}" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold border border-slate-800 transition-all text-center">
                 Access Portal Login
             </a>
-        </div>
-
-        <!-- Feature Grid Highlights -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-24 text-left">
-            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
-                <div class="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold mb-4">01</div>
-                <h3 class="font-bold text-white mb-2">Permanent Storage</h3>
-                <p class="text-sm text-slate-400">Robust SQLite relational database backend ensuring data persistence and integrity.</p>
-            </div>
-            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
-                <div class="w-10 h-10 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400 font-bold mb-4">02</div>
-                <h3 class="font-bold text-white mb-2">Enterprise Security</h3>
-                <p class="text-sm text-slate-400">Advanced cryptographic hashing and session guards protecting against modern vectors.</p>
-            </div>
-            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
-                <div class="w-10 h-10 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 font-bold mb-4">03</div>
-                <h3 class="font-bold text-white mb-2">Multi-Device Ready</h3>
-                <p class="text-sm text-slate-400">Fluid responsive layout optimized down to mobile screens and up to ultra-wide monitors.</p>
-            </div>
         </div>
     </div>
 </div>
@@ -157,13 +132,13 @@ LOGIN_TEMPLATE = """
         <form method="POST" class="space-y-5">
             <div>
                 <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Gmail Address</label>
-                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-all text-sm">
             </div>
             <div>
                 <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Password</label>
-                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-all text-sm">
             </div>
-            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5 text-sm">
+            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all text-sm">
                 Authenticate & Enter
             </button>
         </form>
@@ -188,13 +163,13 @@ REGISTER_TEMPLATE = """
         <form method="POST" class="space-y-5">
             <div>
                 <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Gmail Address</label>
-                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-all text-sm">
             </div>
             <div>
                 <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Secure Password</label>
-                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-all text-sm">
             </div>
-            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5 text-sm">
+            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all text-sm">
                 Register & Initialize
             </button>
         </form>
@@ -217,11 +192,9 @@ DASHBOARD_TEMPLATE = """
             <h1 class="text-3xl font-extrabold text-white">Welcome, {{ current_user.email }}</h1>
             <p class="text-sm text-slate-400 mt-1">Your multi-device enterprise environment is fully active and encrypted.</p>
         </div>
-        <div class="flex items-center gap-3">
-            <div class="px-4 py-3 rounded-2xl bg-slate-950 border border-slate-800 text-center">
-                <span class="block text-xs text-slate-500 uppercase">Database Status</span>
-                <span class="text-sm font-bold text-emerald-400">Online & Persistent</span>
-            </div>
+        <div class="px-4 py-3 rounded-2xl bg-slate-950 border border-slate-800 text-center">
+            <span class="block text-xs text-slate-500 uppercase">Database Status</span>
+            <span class="text-sm font-bold text-emerald-400">Online & Persistent</span>
         </div>
     </div>
 
@@ -238,11 +211,11 @@ DASHBOARD_TEMPLATE = """
             <ul class="space-y-3 text-sm text-slate-300">
                 <li class="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/50">
                     <span>Password Encryption</span>
-                    <span class="text-emerald-400 font-semibold">Argon2/Werkzeug Hashed</span>
+                    <span class="text-emerald-400 font-semibold">Werkzeug Hashed</span>
                 </li>
                 <li class="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/50">
                     <span>Multi-Device Ready</span>
-                    <span class="text-indigo-400 font-semibold">Responsive Viewport</span>
+                    <span class="text-indigo-400 font-semibold">Tailwind Responsive</span>
                 </li>
             </ul>
         </div>
@@ -251,8 +224,7 @@ DASHBOARD_TEMPLATE = """
 {% endblock %}
 """
 
-# --- ROUTES ---
-
+# --- ROUTING LOGIC ---
 @app.route('/')
 def index():
     return render_template_string(INDEX_TEMPLATE)
