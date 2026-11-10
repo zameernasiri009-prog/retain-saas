@@ -1,312 +1,437 @@
- import os
-import json
+import os
+import time
+import uuid
 import secrets
-import hashlib
-import sqlite3
-import re
-from datetime import datetime
-from functools import wraps
-from flask import (
-    Flask, request, jsonify, render_template_string, redirect, 
-    url_for, session
-)
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any, List
+
 import stripe
+from fastapi import (
+    FastAPI, Request, Depends, HTTPException, status, Form, Header, BackgroundTasks
+)
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import create_engine, Column, String, Float, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from jose import jwt, JWTError
 
-# ==============================================================================
-# CONFIGURATION & ENTERPRISE ENGINE SETUP
-# ==============================================================================
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
-
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_mock_secret_key_123")
-STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "pk_test_mock_pub_key_123")
-STRIPE_CLIENT_ID = os.environ.get("STRIPE_CLIENT_ID", "ca_mock_client_id_123")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_mock_secret_123")
+# ------------------------------------------------------------------------------
+# CONFIGURATION & CONSTANTS
+# ------------------------------------------------------------------------------
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-retain-saas-production-key-908234")
+ALGORITHM = "HS256"
+MAGIC_LINK_EXPIRE_MINUTES = 15
+SESSION_EXPIRE_HOURS = 24
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./retain_saas.db")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_mock_key")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "whsec_mock_key")
 
 stripe.api_key = STRIPE_SECRET_KEY
 
-DATABASE_FILE = "retain_saas_pro.db"
+# ------------------------------------------------------------------------------
+# DATABASE SETUP
+# ------------------------------------------------------------------------------
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# ==============================================================================
-# DATABASE DETERMINISM & WAL MODE
-# ==============================================================================
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String, unique=True, index=True, nullable=False)
+    subscription_plan = Column(String, default="Scale Enterprise (Active)")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class MagicToken(Base):
+    __tablename__ = "magic_tokens"
+    token = Column(String, primary_key=True)
+    email = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Boolean, default=False)
+
+class PaymentRecovery(Base):
+    __tablename__ = "payment_recoveries"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    customer_email = Column(String, nullable=False)
+    amount_due = Column(Float, nullable=False)
+    status = Column(String, default="ACTION REQUIRED")  # ACTION REQUIRED, RECOVERED, FAILED
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+Base.metadata.create_all(bind=engine)
+
 def get_db():
-    conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-def init_db():
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            company_name TEXT DEFAULT 'RetainSaaS',
-            brand_color TEXT DEFAULT '#4F46E5',
-            stripe_account_id TEXT DEFAULT NULL,
-            stripe_access_token TEXT DEFAULT NULL,
-            stripe_refresh_token TEXT DEFAULT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS dunning_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            event_id TEXT UNIQUE NOT NULL,
-            stripe_customer_id TEXT NOT NULL,
-            customer_email TEXT NOT NULL,
-            amount_due_cents INTEGER NOT NULL,
-            currency TEXT DEFAULT 'USD',
-            invoice_url TEXT DEFAULT '',
-            status TEXT DEFAULT 'past_due',
-            secure_token TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
-        """)
-        conn.commit()
+# ------------------------------------------------------------------------------
+# SECURITY & AUTHENTICATION HELPERS
+# ------------------------------------------------------------------------------
+def create_session_jwt(email: str) -> str:
+    expires = datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRE_HOURS)
+    payload = {"sub": email, "exp": expires}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-init_db()
-
-# ==============================================================================
-# SECURITY & VALIDATION HELPERS
-# ==============================================================================
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def validate_email(email):
-    pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
-    return re.match(pattern, email) is not None
-
-def get_current_user():
-    if 'user_id' not in session:
+def get_current_user_from_cookie(request: Request, db: Session = Depends(get_db)) -> Optional[User]:
+    token = request.cookies.get("session_token")
+    if not token:
         return None
-    with get_db() as conn:
-        return conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return None
+        return db.query(User).filter(User.email == email).first()
+    except JWTError:
+        return None
 
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not get_current_user():
-            return redirect(url_for('auth_page'))
-        return f(*args, **kwargs)
-    return decorated_function
+# Simple double-submission in-memory tracking
+PROCESSED_REQUEST_IDS = set()
 
-# ==============================================================================
-# 1. ANIMATED SPLASH & WELCOME LANDING PAGE (ROOT)
-# ==============================================================================
-SPLASH_TEMPLATE = """
+# ------------------------------------------------------------------------------
+# FASTAPI APPLICATION CREATION
+# ------------------------------------------------------------------------------
+app = FastAPI(title="Retain SaaS Engine", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ------------------------------------------------------------------------------
+# FRONTEND TEMPLATES & HTML DASHBOARD
+# ------------------------------------------------------------------------------
+LOGIN_PAGE_HTML = """
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome to RetainSaaS</title>
+    <title>RetainSaaS Engine - Instant Magic Link</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="h-full bg-slate-950 text-white font-sans flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
-    <header class="w-full max-w-7xl mx-auto px-6 py-6 flex justify-between items-center relative z-10">
-        <div class="flex items-center space-x-3">
-            <div class="h-10 w-10 rounded-xl bg-indigo-600 flex items-center justify-center font-extrabold text-xl shadow-lg shadow-indigo-500/30">R</div>
-            <span class="font-extrabold text-xl tracking-tight text-white">RetainSaaS</span>
-        </div>
-        <a href="/auth" class="text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-slate-200 px-5 py-2.5 rounded-xl border border-slate-800 transition">Log In / Sign Up</a>
-    </header>
-
-    <main class="max-w-4xl mx-auto px-6 text-center relative z-10 my-auto space-y-8 py-12">
-        <div class="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold uppercase">
-            <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-            <span>Next-Gen Subscription Revenue Recovery</span>
-        </div>
-        <h1 class="text-5xl sm:text-7xl font-black tracking-tight text-white leading-tight">
-            Welcome to <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">RetainSaaS</span>.
-        </h1>
-        <p class="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto">
-            Save your money and recover failed customer credit card payments automatically.
-        </p>
-        <div class="pt-4">
-            <a href="/auth" class="inline-block px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-xl shadow-indigo-600/25 transition transform hover:-translate-y-0.5 text-base">
-                Get Started Now &rarr;
-            </a>
-        </div>
-    </main>
-
-    <footer class="w-full text-center py-6 text-slate-600 text-xs border-t border-slate-900">
-        &copy; 2026 RetainSaaS Engine. All rights reserved.
-    </footer>
-</body>
-</html>
-"""
-
-@app.route('/')
-def splash_page():
-    if get_current_user():
-        return redirect(url_for('dashboard'))
-    return render_template_string(SPLASH_TEMPLATE)
-
-# ==============================================================================
-# 2. AUTHENTICATION & REGISTRATION PORTAL (/auth)
-# ==============================================================================
-AUTH_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="en" class="h-full">
-<head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Account Portal - RetainSaaS</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="h-full bg-slate-950 text-white flex items-center justify-center p-4">
-    <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6">
-        <div class="text-center space-y-2">
-            <div class="h-12 w-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-2xl mx-auto shadow-lg shadow-indigo-500/30">R</div>
-            <h2 class="text-2xl font-black tracking-tight text-white">Welcome Back</h2>
-            <p class="text-xs text-slate-400">Enter your credentials to access your control center.</p>
-        </div>
-
-        {% if error %}
-            <div class="bg-red-500/10 border border-red-500/20 p-3 rounded-xl text-xs text-red-400 font-semibold text-center">
-                {{ error }}
+<body class="bg-[#0b0f19] text-white flex items-center justify-center min-h-screen p-4 font-sans">
+    <div id="login-card" class="bg-[#111827] border border-gray-800 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
+        <span class="bg-indigo-900/60 text-indigo-400 text-xs px-3 py-1 rounded-full font-semibold inline-block mb-4">RetainSaaS Engine</span>
+        <h1 class="text-2xl font-bold mb-2">Instant Magic Link</h1>
+        <p class="text-gray-400 text-sm mb-6">Enter your email. No passwords required—log in instantly with a secure tap.</p>
+        
+        <form id="magic-form" onsubmit="handleMagicSubmit(event)">
+            <div class="text-left mb-4">
+                <label class="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Email Address</label>
+                <input type="email" id="email" required placeholder="founder@mysaas.com" 
+                    class="w-full bg-[#1f2937] border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition">
             </div>
-        {% endif %}
-
-        <form action="/auth" method="POST" class="space-y-4">
-            <div>
-                <label class="block text-xs font-bold text-slate-300 uppercase mb-1.5">Email Address</label>
-                <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500">
-            </div>
-            <div>
-                <label class="block text-xs font-bold text-slate-300 uppercase mb-1.5">Password</label>
-                <input type="password" name="password" required placeholder="••••••••" class="w-full p-3.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500">
-            </div>
-            <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-indigo-600/25 transition text-sm">
-                Log In / Create Account
+            <button type="submit" id="submit-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-lg transition duration-200">
+                Send Secure Login Link
             </button>
         </form>
-        <div class="text-center">
-            <a href="/" class="text-xs text-slate-500 hover:text-slate-400">&larr; Back to Welcome Screen</a>
-        </div>
     </div>
+
+    <div id="success-card" class="hidden bg-[#111827] border border-gray-800 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl">
+        <h2 class="text-xl font-bold text-emerald-400 mb-2">Magic Link Generated!</h2>
+        <p class="text-gray-400 text-xs mb-6">Since you are testing on mobile, tap the direct secure login link below to enter your dashboard instantly without typing a password:</p>
+        <a id="instant-link" href="#" class="inline-block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg transition">
+            Tap Here to Log In Instantly &rarr;
+        </a>
+    </div>
+
+    <script>
+        async function handleMagicSubmit(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            btn.disabled = true;
+            btn.innerText = "Generating Link...";
+
+            const email = document.getElementById('email').value;
+            const res = await fetch('/api/auth/magic-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ email })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('login-card').classList.add('hidden');
+                document.getElementById('success-card').classList.remove('hidden');
+                document.getElementById('instant-link').href = data.magic_url;
+            } else {
+                alert(data.detail || "Authentication error");
+                btn.disabled = false;
+                btn.innerText = "Send Secure Login Link";
+            }
+        }
+    </script>
 </body>
 </html>
 """
 
-@app.route('/auth', methods=['GET', 'POST'])
-def auth_page():
-    if get_current_user():
-        return redirect(url_for('dashboard'))
-    
-    error = None
-    if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-
-        if not validate_email(email):
-            error = "Please enter a valid email address."
-        elif len(password) < 4:
-            error = "Password must be at least 4 characters long."
-        else:
-            pwd_hash = hash_password(password)
-            with get_db() as conn:
-                user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-                if not user:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, pwd_hash))
-                    conn.commit()
-                    user_id = cursor.lastrowid
-                else:
-                    if user['password_hash'] != pwd_hash:
-                        error = "Incorrect password for this email."
-                        return render_template_string(AUTH_TEMPLATE, error=error)
-                    user_id = user['id']
-
-            session.clear()
-            session['user_id'] = user_id
-            return redirect(url_for('dashboard'))
-
-    return render_template_string(AUTH_TEMPLATE, error=error)
-
-# ==============================================================================
-# 3. SECURE FOUNDER DASHBOARD (/dashboard)
-# ==============================================================================
-DASHBOARD_TEMPLATE = """
+DASHBOARD_PAGE_HTML = """
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - RetainSaaS</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RetainSaaS Engine - Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="h-full bg-slate-950 text-white font-sans flex flex-col">
-    <nav class="border-b border-slate-900 bg-slate-900/50 px-6 py-4 flex justify-between items-center">
-        <div class="flex items-center space-x-3">
-            <div class="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-sm">R</div>
-            <span class="font-bold text-base text-white">RetainSaaS Control Center</span>
+<body class="bg-[#0b0f19] text-white min-h-screen p-6 font-sans">
+    <header class="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-indigo-600 text-white font-bold px-3 py-1 rounded text-sm">RetainSaaS</div>
+            <span class="text-xs text-gray-400 border border-gray-700 px-2 py-0.5 rounded">{{ user.subscription_plan }}</span>
         </div>
-        <div class="flex items-center space-x-4">
-            <span class="text-xs text-slate-400">{{ user.email }}</span>
-            <a href="/logout" class="text-xs bg-red-500/10 text-red-400 font-semibold px-3.5 py-2 rounded-xl border border-red-500/20 hover:bg-red-500/20">Logout</a>
+        <div class="flex items-center gap-4 text-xs text-gray-400">
+            <span>{{ user.email }}</span>
+            <a href="/auth/logout" class="hover:text-white transition">Logout</a>
         </div>
-    </nav>
+    </header>
 
-    <div class="p-6 sm:p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
-        <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-                <h3 class="font-bold text-lg text-white">Stripe Account Integration</h3>
-                <p class="text-xs text-slate-400 mt-1">Status: <span class="text-indigo-400 font-semibold">{{ user.stripe_account_id or 'Not Connected (Test Sandbox)' }}</span></p>
+    <main class="max-w-6xl mx-auto">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-[#111827] p-6 rounded-xl border border-gray-800">
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">AT-RISK MRR</p>
+                <p class="text-3xl font-extrabold text-white">${{ "%.2f"|format(at_risk_mrr) }}</p>
             </div>
-            <div>
-                {% if user.stripe_account_id %}
-                    <form action="/stripe/disconnect" method="POST"><button class="text-xs bg-red-500/10 text-red-400 font-bold px-4 py-2.5 rounded-xl border border-red-500/20">Disconnect</button></form>
-                {% else %}
-                    <a href="/stripe/authorize" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg shadow-indigo-600/25 inline-block">Connect Stripe Account</a>
-                {% endif %}
+            <div class="bg-[#111827] p-6 rounded-xl border border-gray-800">
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">RECOVERED REVENUE</p>
+                <p class="text-3xl font-extrabold text-emerald-400">${{ "%.2f"|format(recovered_mrr) }}</p>
+            </div>
+            <div class="bg-[#111827] p-6 rounded-xl border border-gray-800">
+                <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">RECOVERY RATE</p>
+                <p class="text-3xl font-extrabold text-indigo-400">{{ "%.1f"|format(recovery_rate) }}%</p>
             </div>
         </div>
 
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-800 font-bold text-sm text-slate-200">Active Dunning Transactions</div>
-            <div class="p-12 text-center text-slate-500 text-sm">
-                No failed payments recorded yet. Your system is live and listening.
+        <div class="bg-[#111827] rounded-xl border border-gray-800 p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="font-bold text-lg">Active Failed Payment Recoveries</h2>
+                <form action="/api/simulate-test-case" method="POST">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-xs font-bold px-4 py-2 rounded transition">
+                        + Simulate Test Case
+                    </button>
+                </form>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm text-gray-300">
+                    <thead class="text-xs text-gray-500 uppercase border-b border-gray-800">
+                        <tr>
+                            <th class="py-3 px-4">Customer</th>
+                            <th class="py-3 px-4">Amount Due</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4 text-right">Action Link</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if recoveries %}
+                            {% for item in recoveries %}
+                            <tr class="border-b border-gray-800/50">
+                                <td class="py-3 px-4">{{ item.customer_email }}</td>
+                                <td class="py-3 px-4">${{ "%.2f"|format(item.amount_due) }}</td>
+                                <td class="py-3 px-4">
+                                    {% if item.status == 'RECOVERED' %}
+                                        <span class="bg-emerald-900/40 text-emerald-400 text-xs px-2 py-1 rounded">RECOVERED</span>
+                                    {% else %}
+                                        <span class="bg-amber-900/40 text-amber-400 text-xs px-2 py-1 rounded">ACTION REQUIRED</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3 px-4 text-right">
+                                    {% if item.status != 'RECOVERED' %}
+                                    <form action="/api/recover/{{ item.id }}" method="POST" class="inline">
+                                        <button type="submit" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1 rounded transition">
+                                            Mark Recovered
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                        <span class="text-xs text-gray-600">Complete</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="4" class="py-8 text-center text-gray-500">
+                                    No active failed payments found. Click "+ Simulate Test Case" above to test!
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
             </div>
         </div>
-    </div>
+    </main>
 </body>
 </html>
 """
 
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    user = get_current_user()
-    return render_template_string(DASHBOARD_TEMPLATE, user=user)
+# ------------------------------------------------------------------------------
+# ROUTE HANDLERS: FRONTEND & AUTHENTICATION
+# ------------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse)
+def index_page(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if user:
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+    return HTMLResponse(content=LOGIN_PAGE_HTML)
 
-@app.route('/logout')
+@app.post("/api/auth/magic-link")
+def request_magic_link(
+    email: str = Form(...),
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    # Double-submit guard check
+    client_ip = request.client.host if request else "unknown"
+    req_key = f"{client_ip}_{email}_{int(time.time() / 5)}"
+    if req_key in PROCESSED_REQUEST_IDS:
+        raise HTTPException(status_code=429, detail="Too many rapid requests. Please wait a second.")
+    PROCESSED_REQUEST_IDS.add(req_key)
+
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=MAGIC_LINK_EXPIRE_MINUTES)
+    
+    magic_record = MagicToken(token=token, email=email, expires_at=expires)
+    db.add(magic_record)
+    db.commit()
+
+    magic_url = f"/auth/verify?token={token}"
+    return JSONResponse(content={"status": "success", "magic_url": magic_url})
+
+@app.get("/auth/verify")
+def verify_magic_link(token: str, db: Session = Depends(get_db)):
+    record = db.query(MagicToken).filter(MagicToken.token == token).first()
+    
+    if not record or record.used or record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Magic link is invalid or expired.")
+
+    record.used = True
+    
+    user = db.query(User).filter(User.email == record.email).first()
+    if not user:
+        user = User(email=record.email)
+        db.add(user)
+    
+    db.commit()
+
+    jwt_token = create_session_jwt(user.email)
+    response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+    response.set_cookie(key="session_token", value=jwt_token, httponly=True, max_age=86400, samesite="lax")
+    return response
+
+@app.get("/auth/logout")
 def logout():
-    session.clear()
-    return redirect(url_for('splash_page'))
+    response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(key="session_token")
+    return response
 
-@app.route('/stripe/authorize')
-@login_required
-def stripe_authorize():
-    return redirect("https://connect.stripe.com/oauth/authorize?response_type=code&client_id=" + STRIPE_CLIENT_ID + "&scope=read_write")
+@app.get("/dashboard", response_class=HTMLResponse)
+def render_dashboard(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
-@app.route('/stripe/disconnect', methods=['POST'])
-@login_required
-def disconnect_stripe():
-    user = get_current_user()
-    with get_db() as conn:
-        conn.execute("UPDATE users SET stripe_account_id = NULL, stripe_access_token = NULL WHERE id = ?", (user['id'],))
-        conn.commit()
-    return redirect(url_for('dashboard'))
+    recoveries = db.query(PaymentRecovery).filter(PaymentRecovery.user_id == user.id).all()
+    
+    at_risk = sum(r.amount_due for r in recoveries if r.status == "ACTION REQUIRED")
+    recovered = sum(r.amount_due for r in recoveries if r.status == "RECOVERED")
+    total = sum(r.amount_due for r in recoveries)
+    rate = (recovered / total * 100) if total > 0 else 0.0
 
-# ==============================================================================
-# ENTRY POINT
-# ==============================================================================
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    from jinja2 import Template
+    template = Template(DASHBOARD_PAGE_HTML)
+    rendered = template.render(
+        user=user,
+        recoveries=recoveries,
+        at_risk_mrr=at_risk,
+        recovered_mrr=recovered,
+        recovery_rate=rate
+    )
+    return HTMLResponse(content=rendered)
+
+# ------------------------------------------------------------------------------
+# ROUTE HANDLERS: SIMULATION & RECOVERY API
+# ------------------------------------------------------------------------------
+@app.post("/api/simulate-test-case")
+def simulate_failed_payment(request: Request, db: Session = Depends(get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    test_case = PaymentRecovery(
+        user_id=user.id,
+        customer_email=f"client_{secrets.token_hex(3)}@example.com",
+        amount_due=49.00,
+        status="ACTION REQUIRED"
+    )
+    db.add(test_case)
+    db.commit()
+    return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+
+@app.post("/api/recover/{recovery_id}")
+def mark_recovered(recovery_id: str, request: Request, db: Session = Depends(get_db)):
+    user = get_current_user_from_cookie(request, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    rec = db.query(PaymentRecovery).filter(
+        PaymentRecovery.id == recovery_id, 
+        PaymentRecovery.user_id == user.id
+    ).first()
+    
+    if rec:
+        rec.status = "RECOVERED"
+        db.commit()
+
+    return RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+
+# ------------------------------------------------------------------------------
+# PRODUCTION STRIPE WEBHOOK HANDLER
+# ------------------------------------------------------------------------------
+@app.post("/webhook/stripe")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+
+    if event["type"] == "invoice.payment_failed":
+        session_obj = event["data"]["object"]
+        customer_email = session_obj.get("customer_email")
+        amount_due = session_obj.get("amount_due", 0) / 100.0
+
+        # Assign to demo user for integration testing
+        admin_user = db.query(User).first()
+        if admin_user and customer_email:
+            recovery_entry = PaymentRecovery(
+                user_id=admin_user.id,
+                customer_email=customer_email,
+                amount_due=amount_due,
+                status="ACTION REQUIRED"
+            )
+            db.add(recovery_entry)
+            db.commit()
+
+    return JSONResponse(content={"status": "success"})
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
