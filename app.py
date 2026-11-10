@@ -1,5 +1,7 @@
-import os
+
+     import os
 import secrets
+import hashlib
 import sqlite3
 from datetime import timedelta
 from functools import wraps
@@ -33,6 +35,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
             company_name TEXT DEFAULT 'My SaaS',
             plan_tier TEXT DEFAULT 'Scale Enterprise (Active)',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -69,6 +72,9 @@ def init_db():
 
 init_db()
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
 def get_current_user():
     if 'user_id' not in session:
         return None
@@ -96,7 +102,7 @@ def index():
         <title>RevivePay - Automated B2B SaaS Dunning & Revenue Recovery</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
-    <body class="bg-gray-950 text-white font-sans antialiased selection:bg-indigo-500 selection:text-white">
+    <body class="bg-gray-950 text-white font-sans antialiased">
         <nav class="border-b border-gray-900 px-6 py-4 flex justify-between items-center max-w-7xl mx-auto">
             <div class="flex items-center space-x-2">
                 <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-lg shadow-lg shadow-indigo-600/30">R</div>
@@ -104,7 +110,7 @@ def index():
             </div>
             <div class="space-x-4">
                 <a href="/login" class="text-sm font-semibold text-gray-300 hover:text-white transition">Sign In</a>
-                <a href="/login" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 transition">Get Started</a>
+                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 transition">Get Started</a>
             </div>
         </nav>
         <header class="max-w-4xl mx-auto px-6 py-24 text-center space-y-8">
@@ -114,65 +120,133 @@ def index():
             <h1 class="text-5xl md:text-7xl font-black tracking-tight leading-none">Recover Failed Payments.<br><span class="text-indigo-500">Protect Your MRR.</span></h1>
             <p class="text-gray-400 text-base md:text-lg max-w-2xl mx-auto font-medium">RevivePay automatically intercepts failed credit card charges, rescues expiring subscriptions, and puts thousands of dollars back into your bank account on autopilot.</p>
             <div class="flex flex-col sm:flex-row justify-center gap-4 pt-4">
-                <a href="/login" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition text-base">Launch Your Dashboard &rarr;</a>
+                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition text-base">Create Free Account &rarr;</a>
             </div>
         </header>
     </body>
     </html>
     """)
 
-# --- STREAMLINED SECURE LOGIN PAGE ---
-@app.route('/login', methods=['GET'])
+# --- SECURE LOGIN PAGE ---
+@app.route('/login', methods=['GET', 'POST'])
 def login_page():
     if get_current_user():
         return redirect(url_for('dashboard'))
+    
+    error = None
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        if not email or not password:
+            error = "Email and password are required."
+        else:
+            pwd_hash = hash_password(password)
+            with get_db() as conn:
+                user = conn.execute("SELECT * FROM users WHERE email = ? AND password_hash = ?", (email, pwd_hash)).fetchone()
+                if user:
+                    session.clear()
+                    session['user_id'] = user['id']
+                    session.permanent = True
+                    return redirect(url_for('dashboard'))
+                else:
+                    error = "Invalid email or password."
+
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Login - RevivePay</title>
+        <title>Sign In - RevivePay</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
         <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
             <div class="text-center space-y-2">
                 <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
-                <h1 class="text-2xl font-black tracking-tight">Founder Portal</h1>
-                <p class="text-xs text-gray-400">Enter your email to instantly access your secure dashboard.</p>
+                <h1 class="text-2xl font-black tracking-tight">Welcome Back</h1>
+                <p class="text-xs text-gray-400">Sign in securely with your password.</p>
             </div>
+            {% if error %}
+            <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
+            {% endif %}
             <form action="/login" method="POST" class="space-y-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
                     <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
                 </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Access Dashboard &rarr;</button>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
+                    <input type="password" name="password" required placeholder="••••••••" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Sign In</button>
             </form>
+            <p class="text-center text-xs text-gray-400">Don't have an account? <a href="/register" class="text-indigo-400 font-bold hover:underline">Register here</a></p>
         </div>
     </body>
     </html>
-    """)
+    """, error=error)
 
-@app.route('/login', methods=['POST'])
-def login_post():
-    email = request.form.get('email', '').strip().lower()
-    if not email:
-        return "Email required.", 400
-    
-    with get_db() as conn:
-        user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if not user:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO users (email) VALUES (?)", (email,))
-            conn.commit()
-            user_id = cursor.lastrowid
+# --- SECURE REGISTER PAGE ---
+@app.route('/register', methods=['GET', 'POST'])
+def register_page():
+    if get_current_user():
+        return redirect(url_for('dashboard'))
+        
+    error = None
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        if not email or not password:
+            error = "Email and password are required."
         else:
-            user_id = user['id']
-            
-    session.clear()
-    session['user_id'] = user_id
-    session.permanent = True
-    return redirect(url_for('dashboard'))
+            pwd_hash = hash_password(password)
+            try:
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, pwd_hash))
+                    conn.commit()
+                    user_id = cursor.lastrowid
+                session.clear()
+                session['user_id'] = user_id
+                session.permanent = True
+                return redirect(url_for('dashboard'))
+            except sqlite3.IntegrityError:
+                error = "An account with this email already exists. Please sign in."
+
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Register - RevivePay</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
+            <div class="text-center space-y-2">
+                <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
+                <h1 class="text-2xl font-black tracking-tight">Create Account</h1>
+                <p class="text-xs text-gray-400">Protect your SaaS revenue with enterprise security.</p>
+            </div>
+            {% if error %}
+            <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
+            {% endif %}
+            <form action="/register" method="POST" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
+                    <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
+                    <input type="password" name="password" required placeholder="••••••••" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Create Secure Account</button>
+            </form>
+            <p class="text-center text-xs text-gray-400">Already have an account? <a href="/login" class="text-indigo-400 font-bold hover:underline">Sign in</a></p>
+        </div>
+    </body>
+    </html>
+    """, error=error)
 
 # --- FOUNDER DASHBOARD ---
 @app.route('/dashboard')
@@ -399,4 +473,4 @@ def logout():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
+           
