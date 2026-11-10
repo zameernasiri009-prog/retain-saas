@@ -903,7 +903,9 @@ def billing_portal():
 # ==============================================================================
 if __name__ == '__main__':
     print("🚀 RetainSaaS Engine Running on http://127.0.0.1:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True) import stripe
+    app.run(host='0.0.0.0', port=5000, debug=True) 
+
+import stripe
 import os
 from flask import Flask, redirect, request, session, url_for
 
@@ -944,4 +946,3 @@ def stripe_oauth_callback():
 
   except Exception as e:
     return f"An error occurred during token exchange: {str(e)}", 500
-
