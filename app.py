@@ -1,28 +1,16 @@
 import os
-import json
-import time
 import secrets
 import hashlib
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import wraps
-from flask import (
-    Flask, request, jsonify, render_template_string, redirect, 
-    url_for, session, make_response
-)
-import stripe
+from flask import Flask, request, render_template_string, redirect, url_for, session
 
 app = Flask(__name__)
-# Lock the session permanently so you never get logged out accidentally
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "retain_saas_ultra_secure_secret_key_999888777")
 app.config['SESSION_COOKIE_NAME'] = 'retainsaas_session'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
-
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_mock_secret_key_123")
-STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "pk_test_mock_pub_key_123")
-stripe.api_key = STRIPE_SECRET_KEY
-stripe.default_http_client = stripe.http_client.RequestsClient(timeout=10.0)
 
 DATABASE_FILE = "retainsaas_master_ultimate.db"
 
@@ -43,8 +31,6 @@ def init_db():
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             company_name TEXT DEFAULT 'My SaaS Product',
-            brand_color TEXT DEFAULT '#4F46E5',
-            stripe_account_id TEXT DEFAULT NULL,
             plan_tier TEXT DEFAULT 'Scale Enterprise (Active)',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -112,7 +98,7 @@ def login_page():
             <div class="text-center space-y-2">
                 <div class="inline-block bg-indigo-600 text-white font-extrabold px-4 py-1.5 rounded-xl text-sm mb-2">RetainSaaS Engine</div>
                 <h1 class="text-2xl font-black tracking-tight">Founder Portal Access</h1>
-                <p class="text-xs text-gray-400">Enter your email to sign in or instantly create your secure account.</p>
+                <p class="text-xs text-gray-400">Enter your email and password to sign in or instantly create your secure account.</p>
             </div>
             <form action="/login" method="POST" class="space-y-4">
                 <div>
