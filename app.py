@@ -1,4 +1,3 @@
-
 import os
 import json
 import time
@@ -15,7 +14,7 @@ from flask import (
 import stripe
 
 # ==============================================================================
-# ZERO-COMPROMISE ENTERPRISE CONFIGURATION
+# RETAINSAAS MASTER ENTERPRISE CONFIGURATION
 # ==============================================================================
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -28,10 +27,10 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_mock_secr
 stripe.api_key = STRIPE_SECRET_KEY
 stripe.default_http_client = stripe.http_client.RequestsClient(timeout=10.0)
 
-DATABASE_FILE = "dunning_saas_perfection.db"
+DATABASE_FILE = "retainsaas_master_ultimate.db"
 
 # ==============================================================================
-# ABSOLUTE DATABASE DETERMINISM (WAL MODE & ACID TRANSACTION SAFETY)
+# ABSOLUTE DATABASE DETERMINISM (WAL MODE & FOREIGN KEY CASCADES)
 # ==============================================================================
 def get_db():
     conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
@@ -57,7 +56,9 @@ def init_db():
             stripe_account_id TEXT DEFAULT NULL,
             stripe_access_token TEXT DEFAULT NULL,
             stripe_refresh_token TEXT DEFAULT NULL,
-            plan_tier TEXT DEFAULT 'Enterprise Scale',
+            plan_tier TEXT DEFAULT 'Scale Enterprise',
+            from_name TEXT DEFAULT 'Billing Support',
+            reply_to_email TEXT DEFAULT 'billing@mysaas.com',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -70,6 +71,7 @@ def init_db():
             event_id TEXT UNIQUE NOT NULL,
             stripe_customer_id TEXT NOT NULL,
             customer_email TEXT NOT NULL,
+            customer_name TEXT DEFAULT 'Valued Customer',
             amount_due_cents INTEGER NOT NULL,
             currency TEXT DEFAULT 'USD',
             invoice_url TEXT DEFAULT '',
@@ -82,7 +84,7 @@ def init_db():
         );
         """)
 
-        # 3. Outreach Queue Table (Automated Multi-Touch Sequence)
+        # 3. Outreach Queue Table (Multi-Touch Sequence Automation)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS outreach_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,12 +97,25 @@ def init_db():
             FOREIGN KEY (dunning_event_id) REFERENCES dunning_events (id) ON DELETE CASCADE
         );
         """)
+
+        # 4. Custom Dunning Templates Table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            touchpoint INTEGER NOT NULL,
+            subject_line TEXT NOT NULL,
+            body_text TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        );
+        """)
+
         conn.commit()
 
 init_db()
 
 # ==============================================================================
-# ZERO-TRUST AUTHENTICATION & SECURITY DECORATORS
+# ZERO-TRUST AUTHENTICATION & SECURITY UTILITIES
 # ==============================================================================
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -123,7 +138,7 @@ def generate_secure_token():
     return f"sec_tok_{secrets.token_urlsafe(24)}"
 
 # ==============================================================================
-# BACKGROUND CRON WORKER (FAULT-ISOLATED THREAD)
+# FAULT-ISOLATED BACKGROUND OUTREACH WORKER (CRON THREAD)
 # ==============================================================================
 def background_outreach_worker():
     while True:
@@ -139,17 +154,17 @@ def background_outreach_worker():
                 for task in pending:
                     event = conn.execute("SELECT * FROM dunning_events WHERE id = ?", (task['dunning_event_id'],)).fetchone()
                     if event and event['status'] == 'past_due':
-                        print(f"[OUTREACH DISPATCH] Touchpoint {task['touchpoint']} via {task['channel']} -> {event['customer_email']}")
+                        print(f"[ENTERPRISE DISPATCH] Touchpoint {task['touchpoint']} via {task['channel']} -> {event['customer_email']} (${event['amount_due_cents']/100.0})")
                     
                     conn.execute("UPDATE outreach_queue SET status = 'sent', sent_at = CURRENT_TIMESTAMP WHERE id = ?", (task['id'],))
                 conn.commit()
         except Exception as e:
-            print(f"[WORKER RECOVERY] Handled exception: {str(e)}")
+            print(f"[WORKER RECOVERY EXCEPTION] {str(e)}")
 
 threading.Thread(target=background_outreach_worker, daemon=True).start()
 
 # ==============================================================================
-# STRIPE OAUTH & WEBHOOK ENGINE (CRYPTOGRAPHICALLY VERIFIED)
+# STRIPE OAUTH & CRYPTOGRAPHICALLY SECURE WEBHOOK ENGINE
 # ==============================================================================
 @app.route('/stripe/authorize')
 @login_required
@@ -170,7 +185,7 @@ def handle_stripe_oauth_callback():
     expected_state = session.pop('stripe_oauth_state', None)
 
     if not expected_state or returned_state != expected_state:
-        return "CSRF State Mismatch. Authorization aborted.", 400
+        return "CSRF State Mismatch Error. Authorization aborted.", 400
 
     user = get_current_user()
     if code:
@@ -227,13 +242,14 @@ def stripe_webhook():
             try:
                 cursor.execute("""
                     INSERT INTO dunning_events 
-                    (user_id, event_id, stripe_customer_id, customer_email, amount_due_cents, currency, invoice_url, status, attempt_count, secure_token)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'past_due', 1, ?)
+                    (user_id, event_id, stripe_customer_id, customer_email, customer_name, amount_due_cents, currency, invoice_url, status, attempt_count, secure_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'past_due', 1, ?)
                 """, (
                     user_id, 
                     event.get('id', f"evt_{secrets.token_hex(8)}"), 
                     data_object.get('customer', 'cus_mock'), 
-                    data_object.get('customer_email', 'client@example.com'), 
+                    data_object.get('customer_email', 'client@example.com'),
+                    data_object.get('customer_name', 'Valued Customer'),
                     int(data_object.get('amount_due', 3900)), 
                     data_object.get('currency', 'usd').upper(), 
                     data_object.get('hosted_invoice_url', ''), 
@@ -242,7 +258,7 @@ def stripe_webhook():
                 dunning_id = cursor.lastrowid
                 conn.commit()
 
-                # Schedule automated outreach queue
+                # Schedule Multi-Touch Sequence (T+15m, T+72h, T+7d)
                 now = datetime.utcnow()
                 conn.execute("INSERT INTO outreach_queue (dunning_event_id, touchpoint, channel, scheduled_time) VALUES (?, 1, 'email', ?)", (dunning_id, now + timedelta(minutes=15)))
                 conn.execute("INSERT INTO outreach_queue (dunning_event_id, touchpoint, channel, scheduled_time) VALUES (?, 2, 'email', ?)", (dunning_id, now + timedelta(hours=72)))
@@ -250,7 +266,7 @@ def stripe_webhook():
                 conn.execute("INSERT INTO outreach_queue (dunning_event_id, touchpoint, channel, scheduled_time) VALUES (?, 3, 'email', ?)", (dunning_id, now + timedelta(days=7)))
                 conn.commit()
             except sqlite3.IntegrityError:
-                pass # Idempotent rejection of duplicate event_id
+                pass # Idempotent duplicate rejection
 
         elif event_type == 'invoice.payment_succeeded':
             customer_id = data_object.get('customer')
@@ -265,17 +281,23 @@ def stripe_webhook():
                 cursor.execute("UPDATE outreach_queue SET status = 'canceled' WHERE dunning_event_id = ? AND status = 'pending'", (event_record['id'],))
             conn.commit()
 
+        elif event_type == 'customer.subscription.updated':
+            customer_id = data_object.get('customer')
+            sub_status = data_object.get('status')
+            conn.execute("UPDATE dunning_events SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE stripe_customer_id = ? AND status != 'recovered'", (sub_status, customer_id))
+            conn.commit()
+
     return jsonify({"status": "success"}), 200
 
 # ==============================================================================
-# PIXEL-PERFECT CUSTOMER CARD UPDATE PORTAL (TAILWIND RESPONSIVE UI)
+# PIXEL-PERFECT CUSTOMER CARD UPDATE PORTAL (RESPONSIVE TAILWIND UI)
 # ==============================================================================
 CARD_UPDATE_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Update Payment - {{ company_name }}</title>
+    <title>Secure Payment Portal - {{ company_name }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.stripe.com/v3/"></script>
     <style>:root { --brand-color: {{ brand_color }}; } .bg-brand { background-color: var(--brand-color); }</style>
@@ -283,6 +305,7 @@ CARD_UPDATE_TEMPLATE = """
 <body class="bg-gray-50 text-gray-800 min-h-screen flex items-center justify-center p-4">
     <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-100 space-y-6">
         <div class="text-center">
+            {% if brand_logo_url %}<img src="{{ brand_logo_url }}" class="h-12 mx-auto mb-3 object-contain">{% endif %}
             <h2 class="text-2xl font-extrabold text-gray-900">{{ company_name }}</h2>
             <p class="text-sm text-amber-600 mt-1 font-semibold">Subscription Paused Due to Payment Failure</p>
         </div>
@@ -293,7 +316,7 @@ CARD_UPDATE_TEMPLATE = """
         <form id="payment-form" class="space-y-4">
             <div id="card-element" class="p-3.5 border rounded-lg bg-white shadow-sm"></div>
             <div id="card-errors" class="text-xs text-red-600 font-medium"></div>
-            <button id="submit-btn" type="submit" class="w-full bg-brand text-white py-3.5 rounded-xl font-bold shadow-lg hover:opacity-90 transition">Update Payment Method</button>
+            <button id="submit-btn" type="submit" class="w-full bg-brand text-white py-3.5 rounded-xl font-bold shadow-lg hover:opacity-90 transition">Update Payment Method & Restore</button>
         </form>
     </div>
     <script>
@@ -312,7 +335,7 @@ CARD_UPDATE_TEMPLATE = """
             if (error) {
                 document.getElementById('card-errors').textContent = error.message;
                 btn.disabled = false;
-                btn.textContent = 'Update Payment Method';
+                btn.textContent = 'Update Payment Method & Restore';
             } else {
                 const res = await fetch('/api/update-payment-method', {
                     method: 'POST',
@@ -321,12 +344,12 @@ CARD_UPDATE_TEMPLATE = """
                 });
                 const data = await res.json();
                 if (data.success) {
-                    alert('Payment successful! Subscription access fully restored.');
+                    alert('Payment successful! Your subscription has been fully restored.');
                     window.location.reload();
                 } else {
                     document.getElementById('card-errors').textContent = data.message || 'Error processing transaction.';
                     btn.disabled = false;
-                    btn.textContent = 'Update Payment Method';
+                    btn.textContent = 'Update Payment Method & Restore';
                 }
             }
         });
@@ -341,7 +364,7 @@ def card_update_page(token):
         event = conn.execute("SELECT * FROM dunning_events WHERE secure_token = ?", (token,)).fetchone()
         if not event: return "Invalid or Expired Payment Link", 404
         user = conn.execute("SELECT * FROM users WHERE id = ?", (event['user_id'],)).fetchone()
-    return render_template_string(CARD_UPDATE_TEMPLATE, token=token, company_name=user['company_name'], brand_color=user['brand_color'], amount_due=event['amount_due_cents']/100.0, currency=event['currency'], stripe_pub_key=STRIPE_PUBLISHABLE_KEY)
+    return render_template_string(CARD_UPDATE_TEMPLATE, token=token, company_name=user['company_name'], brand_color=user['brand_color'], brand_logo_url=user['brand_logo_url'], amount_due=event['amount_due_cents']/100.0, currency=event['currency'], stripe_pub_key=STRIPE_PUBLISHABLE_KEY)
 
 @app.route('/api/update-payment-method', methods=['POST'])
 def api_update_payment_method():
@@ -355,30 +378,36 @@ def api_update_payment_method():
         if not event: return jsonify({"success": False, "message": "Dunning record not found."}), 404
         if event['status'] == 'recovered': return jsonify({"success": True})
 
-        # Atomic State Lock: Prevents double-click race conditions
+        # Atomic State Lock: Guaranteed race-condition protection
         cursor.execute("UPDATE dunning_events SET status = 'recovered', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'recovered'", (event['id'],))
         cursor.execute("UPDATE outreach_queue SET status = 'canceled' WHERE dunning_event_id = ? AND status = 'pending'", (event['id'],))
         conn.commit()
     return jsonify({"success": True})
 
 # ==============================================================================
-# PIXEL-PERFECT FOUNDER DASHBOARD & AUTHENTICATION
+# PIXEL-PERFECT FOUNDER DASHBOARD & KPI ANALYTICS
 # ==============================================================================
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Dashboard - RetainSaaS</title><script src="https://cdn.tailwindcss.com"></script></head>
+<head><meta charset="UTF-8"><title>Founder Dashboard - RetainSaaS</title><script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-gray-100 text-gray-900 font-sans">
     <div class="min-h-screen flex flex-col">
         <nav class="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm">
-            <div class="font-extrabold text-indigo-600 text-lg">RetainSaaS Zero-Fault Engine</div>
-            <a href="/logout" class="text-red-500 font-semibold text-sm hover:underline">Logout</a>
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600 text-white font-extrabold px-3 py-1.5 rounded-lg">RetainSaaS Master</div>
+                <span class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-bold">{{ user.plan_tier }}</span>
+            </div>
+            <div class="flex items-center space-x-4 text-sm font-semibold">
+                <span class="text-gray-600">{{ user.email }}</span>
+                <a href="/logout" class="text-red-500 hover:text-red-700">Logout</a>
+            </div>
         </nav>
-        <div class="p-8 max-w-7xl mx-auto w-full space-y-6 flex-1">
+        <div class="p-8 max-w-7xl mx-auto w-full space-y-8 flex-1">
             <div class="bg-white p-6 rounded-2xl shadow-sm border flex justify-between items-center">
                 <div>
-                    <h3 class="font-bold text-lg text-gray-800">Stripe Account Integration</h3>
-                    <p class="text-sm text-gray-500 mt-0.5">{{ user.stripe_account_id or 'Not Connected' }}</p>
+                    <h3 class="font-bold text-lg text-gray-800">Stripe Integration Status</h3>
+                    <p class="text-sm text-gray-500 mt-0.5">Connected account ID: {{ user.stripe_account_id or 'Not Connected' }}</p>
                 </div>
                 <div>
                     {% if user.stripe_account_id %}
@@ -387,6 +416,12 @@ DASHBOARD_TEMPLATE = """
                         <a href="/stripe/authorize" class="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow hover:bg-indigo-700 transition">Connect Stripe Account</a>
                     {% endif %}
                 </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border"><p class="text-xs font-bold text-gray-400 uppercase">At-Risk MRR</p><h3 class="text-3xl font-extrabold text-amber-600 mt-2">${{ "%.2f"|format(at_risk_mrr) }}</h3></div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border"><p class="text-xs font-bold text-gray-400 uppercase">Recovered Revenue</p><h3 class="text-3xl font-extrabold text-green-600 mt-2">${{ "%.2f"|format(recovered_mrr) }}</h3></div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border"><p class="text-xs font-bold text-gray-400 uppercase">Recovery Rate</p><h3 class="text-3xl font-extrabold text-indigo-600 mt-2">{{ "%.1f"|format(recovery_rate) }}%</h3></div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border"><p class="text-xs font-bold text-gray-400 uppercase">Active Recoveries</p><h3 class="text-3xl font-extrabold text-gray-800 mt-2">{{ active_count }}</h3></div>
             </div>
             <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
                 <div class="px-6 py-4 border-b font-extrabold text-gray-800">Active Dunning Transactions & Recovery Log</div>
@@ -416,15 +451,33 @@ def dashboard():
     user = get_current_user()
     with get_db() as conn:
         events = conn.execute("SELECT * FROM dunning_events WHERE user_id = ? ORDER BY id DESC", (user['id'],)).fetchall()
-    return render_template_string(DASHBOARD_TEMPLATE, user=user, events=events)
 
+    at_risk_mrr = sum(e['amount_due_cents'] for e in events if e['status'] == 'past_due') / 100.0
+    recovered_mrr = sum(e['amount_due_cents'] for e in events if e['status'] == 'recovered') / 100.0
+    total_count, recovered_count = len(events), sum(1 for e in events if e['status'] == 'recovered')
+    recovery_rate = (recovered_count / total_count * 100) if total_count > 0 else 0.0
+    active_count = sum(1 for e in events if e['status'] == 'past_due')
+
+    return render_template_string(
+        DASHBOARD_TEMPLATE,
+        user=user,
+        events=events,
+        at_risk_mrr=at_risk_mrr,
+        recovered_mrr=recovered_mrr,
+        recovery_rate=recovery_rate,
+        active_count=active_count
+    )
+
+# ==============================================================================
+# ZERO-TRUST AUTHENTICATION & PORTAL ROUTES
+# ==============================================================================
 AUTH_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Portal Auth</title><script src="https://cdn.tailwindcss.com"></script></head>
+<head><meta charset="UTF-8"><title>RetainSaaS Auth Portal</title><script src="https://cdn.tailwindcss.com"></script></head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
-    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6 border border-gray-100">
-        <h1 class="text-2xl font-extrabold text-center text-gray-900">RetainSaaS Portal</h1>
+    <div class="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-100 space-y-6">
+        <h1 class="text-2xl font-extrabold text-center text-gray-900">RetainSaaS Master Portal</h1>
         <form action="/login" method="POST" class="space-y-4">
             <div><label class="block text-sm font-bold text-gray-700">Email Address</label><input type="email" name="email" required class="w-full mt-1 p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500"></div>
             <div><label class="block text-sm font-bold text-gray-700">Password</label><input type="password" name="password" required class="w-full mt-1 p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500"></div>
@@ -471,6 +524,7 @@ def logout():
 # ENTRY POINT
 # ==============================================================================
 if __name__ == '__main__':
-    print("🚀 RetainSaaS Uncompromising Perfection Engine Running on http://127.0.0.1:5000")
+    print("🚀 RetainSaaS Master Ultimate Edition Running on http://127.0.0.1:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
+
 
