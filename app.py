@@ -23,7 +23,6 @@ STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "pk_test_mock_
 STRIPE_CLIENT_ID = os.environ.get("STRIPE_CLIENT_ID", "ca_mock_client_id_123")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_mock_secret_123")
 
-stripe.api_key = STRIPE_SECRET_KEY
 stripe.default_http_client = stripe.http_client.RequestsClient(timeout=10.0)
 
 DATABASE_FILE = "retain_saas_pro.db"
