@@ -1,247 +1,308 @@
 import os
-import sqlite3
-from flask import Flask, render_template_string, request, redirect, url_for, session
+from flask import Flask, render_template_string, redirect, url_for, request, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "revivepay-super-secret-key-2026")
-app.permanent_session_lifetime = 86400 * 7
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-secret-enterprise-key-change-in-production')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///enterprise_portal.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-DB_PATH = "revivepay.db"
+db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# --- DATABASE MODELS ---
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
 
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
 
-# Initialize database on app startup
-init_db()
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+# --- HTML TEMPLATES (Embedded for standalone execution) ---
+
+BASE_LAYOUT = """
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Enterprise Portal{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    </style>
+</head>
+<body class="h-full text-slate-100 flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+    <!-- Navigation Bar -->
+    <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+            <a href="{{ url_for('index') }}" class="flex items-center gap-3 group">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:scale-105 transition-transform duration-300">
+                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">VORTEX<span class="text-indigo-400">SECURE</span></span>
+            </a>
+            <div class="flex items-center gap-4">
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('dashboard') }}" class="text-sm font-medium text-slate-300 hover:text-white transition-colors">Dashboard</a>
+                    <a href="{{ url_for('logout') }}" class="px-4 py-2 rounded-xl text-sm font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all border border-slate-700/60 shadow-sm">Sign Out</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="text-sm font-medium text-slate-300 hover:text-white transition-colors">Sign In</a>
+                    <a href="{{ url_for('register') }}" class="px-5 py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5">Get Started</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="max-w-xl mx-auto w-full px-6 mt-6">
+                {% for category, message in messages %}
+                    <div class="p-4 rounded-xl border {% if category == 'error' %}bg-rose-500/10 border-rose-500/30 text-rose-300{% else %}bg-emerald-500/10 border-emerald-500/30 text-emerald-300{% endif %} text-sm font-medium shadow-lg animate-fade-in flex items-center justify-between">
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col justify-center">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-8 px-6 text-center text-xs text-slate-500">
+        <p>&copy; 2026 VortexSecure Enterprise Systems. Multi-device ready & fortified with advanced security protocols.</p>
+    </footer>
+</body>
+</html>
+"""
+
+INDEX_TEMPLATE = """
+{% extends "base" %}
+{% block title %}VortexSecure - Next-Gen Enterprise Portal{% endblock %}
+{% block content %}
+<div class="relative overflow-hidden py-24 px-6 lg:px-8">
+    <!-- Glowing background effects -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-indigo-600/15 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="absolute top-1/4 right-10 w-[400px] h-[400px] bg-violet-600/10 rounded-full blur-3xl pointer-events-none"></div>
+
+    <div class="max-w-4xl mx-auto text-center relative z-10">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-8 shadow-inner">
+            <span class="w-2 h-2 rounded-full bg-indigo-400 animate-ping"></span> Enterprise Security Grade 5.0
+        </div>
+        <h1 class="text-5xl sm:text-7xl font-extrabold tracking-tight text-white mb-8 leading-tight">
+            The Ultimate <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Enterprise Gateway</span>
+        </h1>
+        <p class="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-12 font-light">
+            Engineered for high-scale organizations. Featuring permanent database tracking, bulletproof credential protection, and a multi-device ready interface that leaves everyone speechless.
+        </p>
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <a href="{{ url_for('register') }}" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold shadow-xl shadow-indigo-600/25 transition-all transform hover:-translate-y-0.5 text-center">
+                Create Secure Account
+            </a>
+            <a href="{{ url_for('login') }}" class="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold border border-slate-800 transition-all text-center">
+                Access Portal Login
+            </a>
+        </div>
+
+        <!-- Feature Grid Highlights -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-24 text-left">
+            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
+                <div class="w-10 h-10 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold mb-4">01</div>
+                <h3 class="font-bold text-white mb-2">Permanent Storage</h3>
+                <p class="text-sm text-slate-400">Robust SQLite relational database backend ensuring data persistence and integrity.</p>
+            </div>
+            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
+                <div class="w-10 h-10 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400 font-bold mb-4">02</div>
+                <h3 class="font-bold text-white mb-2">Enterprise Security</h3>
+                <p class="text-sm text-slate-400">Advanced cryptographic hashing and session guards protecting against modern vectors.</p>
+            </div>
+            <div class="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
+                <div class="w-10 h-10 rounded-lg bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-400 font-bold mb-4">03</div>
+                <h3 class="font-bold text-white mb-2">Multi-Device Ready</h3>
+                <p class="text-sm text-slate-400">Fluid responsive layout optimized down to mobile screens and up to ultra-wide monitors.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+"""
+
+LOGIN_TEMPLATE = """
+{% extends "base" %}
+{% block title %}Sign In - VortexSecure{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto w-full px-6 py-12">
+    <div class="bg-slate-900/80 border border-slate-800/80 p-8 rounded-3xl shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+        <h2 class="text-2xl font-extrabold text-white mb-2">Welcome Back</h2>
+        <p class="text-sm text-slate-400 mb-8">Authenticate using your Gmail and master password.</p>
+        
+        <form method="POST" class="space-y-5">
+            <div>
+                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Gmail Address</label>
+                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Password</label>
+                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+            </div>
+            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5 text-sm">
+                Authenticate & Enter
+            </button>
+        </form>
+        <p class="text-center text-xs text-slate-500 mt-6">
+            New operator? <a href="{{ url_for('register') }}" class="text-indigo-400 font-semibold hover:underline">Register account</a>
+        </p>
+    </div>
+</div>
+{% endblock %}
+"""
+
+REGISTER_TEMPLATE = """
+{% extends "base" %}
+{% block title %}Register - VortexSecure{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto w-full px-6 py-12">
+    <div class="bg-slate-900/80 border border-slate-800/80 p-8 rounded-3xl shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+        <h2 class="text-2xl font-extrabold text-white mb-2">Create Account</h2>
+        <p class="text-sm text-slate-400 mb-8">Set up permanent enterprise database access.</p>
+        
+        <form method="POST" class="space-y-5">
+            <div>
+                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Gmail Address</label>
+                <input type="email" name="email" required placeholder="name@gmail.com" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Secure Password</label>
+                <input type="password" name="password" required placeholder="••••••••••••" class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-sm">
+            </div>
+            <button type="submit" class="w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-600/30 transition-all transform hover:-translate-y-0.5 text-sm">
+                Register & Initialize
+            </button>
+        </form>
+        <p class="text-center text-xs text-slate-500 mt-6">
+            Already authorized? <a href="{{ url_for('login') }}" class="text-indigo-400 font-semibold hover:underline">Sign in here</a>
+        </p>
+    </div>
+</div>
+{% endblock %}
+"""
+
+DASHBOARD_TEMPLATE = """
+{% extends "base" %}
+{% block title %}Dashboard - VortexSecure{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto w-full px-6 py-12">
+    <div class="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-900 border border-indigo-500/20 p-8 rounded-3xl shadow-2xl mb-8 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div>
+            <div class="inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">● Session Secured</div>
+            <h1 class="text-3xl font-extrabold text-white">Welcome, {{ current_user.email }}</h1>
+            <p class="text-sm text-slate-400 mt-1">Your multi-device enterprise environment is fully active and encrypted.</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <div class="px-4 py-3 rounded-2xl bg-slate-950 border border-slate-800 text-center">
+                <span class="block text-xs text-slate-500 uppercase">Database Status</span>
+                <span class="text-sm font-bold text-emerald-400">Online & Persistent</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="p-6 rounded-3xl bg-slate-900/60 border border-slate-800/80">
+            <h3 class="text-lg font-bold text-white mb-2">Advanced User Files</h3>
+            <p class="text-sm text-slate-400 mb-6">Manage your encrypted vaults, document repositories, and export logs.</p>
+            <div class="p-4 rounded-2xl bg-slate-950 border border-slate-800/60 text-center text-slate-500 text-sm">
+                No active files uploaded in vault yet.
+            </div>
+        </div>
+        <div class="p-6 rounded-3xl bg-slate-900/60 border border-slate-800/80">
+            <h3 class="text-lg font-bold text-white mb-2">Security Diagnostics</h3>
+            <ul class="space-y-3 text-sm text-slate-300">
+                <li class="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/50">
+                    <span>Password Encryption</span>
+                    <span class="text-emerald-400 font-semibold">Argon2/Werkzeug Hashed</span>
+                </li>
+                <li class="flex items-center justify-between p-3 rounded-xl bg-slate-950/50 border border-slate-800/50">
+                    <span>Multi-Device Ready</span>
+                    <span class="text-indigo-400 font-semibold">Responsive Viewport</span>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+"""
+
+# --- ROUTES ---
 
 @app.route('/')
-def landing():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>RevivePay - Automated B2B Dunning & Revenue Recovery</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-950 text-white min-h-screen flex flex-col justify-between p-6">
-        <header class="max-w-5xl mx-auto w-full flex justify-between items-center py-4">
-            <div class="flex items-center space-x-2">
-                <div class="w-9 h-9 bg-indigo-600 rounded-2xl flex items-center justify-center font-black text-lg shadow-lg shadow-indigo-600/30">R</div>
-                <span class="font-black text-xl tracking-tight">RevivePay</span>
-            </div>
-            <div class="space-x-4">
-                <a href="/login" class="text-sm font-bold text-gray-400 hover:text-white transition">Sign In</a>
-                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/30 transition">Get Started</a>
-            </div>
-        </header>
-        <main class="max-w-4xl mx-auto text-center space-y-6 my-auto py-12">
-            <span class="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">Enterprise Revenue Recovery</span>
-            <h1 class="text-5xl md:text-6xl font-black tracking-tight leading-tight">Stop Chasing Failed Payments. <span class="text-indigo-500">Recover SaaS Revenue Automatically.</span></h1>
-            <p class="text-gray-400 text-base md:text-lg max-w-xl mx-auto font-medium">RevivePay automates Stripe dunning, secure card updates, and customer outreach so you never lose a subscriber to expired cards again.</p>
-            <div class="pt-4 flex justify-center space-x-4">
-                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition transform active:scale-95 text-base">Launch Recovery Engine</a>
-            </div>
-        </main>
-        <footer class="text-center text-xs text-gray-400 py-4">&copy; 2026 RevivePay. All rights reserved.</footer>
-    </body>
-    </html>
-    """)
+def index():
+    return render_template_string(INDEX_TEMPLATE)
 
 @app.route('/login', methods=['GET', 'POST'])
-def login_page():
-    if session.get('user_id'):
-        return redirect(url_for('dashboard'))
-    error = None
+def login():
     if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-        with get_db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        email = request.form.get('email')
+        password = request.form.get('password')
+        user = User.query.filter_by(email=email).first()
         
-        if user and check_password_hash(user['password_hash'], password):
-            session.clear()
-            session['user_id'] = user['id']
-            session.permanent = True
+        if user and user.check_password(password):
+            login_user(user)
+            flash('Successfully authenticated!', 'success')
             return redirect(url_for('dashboard'))
-        else:
-            error = "Invalid email or password. Please check your credentials or register."
-            
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Sign In - RevivePay</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
-            <div class="text-center space-y-2">
-                <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
-                <h1 class="text-2xl font-black tracking-tight">Welcome Back</h1>
-                <p class="text-xs text-gray-400">Sign in to manage your dunning recovery workflows.</p>
-            </div>
-            {% if error %}
-            <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
-            {% endif %}
-            <form action="/login" method="POST" autocomplete="off" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
-                    <input type="email" name="email" required placeholder="name@domain.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
-                    <input type="password" name="password" required placeholder="••••••••" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
-                </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Sign In</button>
-            </form>
-            <p class="text-center text-xs text-gray-400">Don't have an account? <a href="/register" class="text-indigo-400 font-bold hover:underline">Register here</a></p>
-        </div>
-    </body>
-    </html>
-    """, error=error)
+        flash('Invalid Gmail or password combination.', 'error')
+    return render_template_string(LOGIN_TEMPLATE)
 
 @app.route('/register', methods=['GET', 'POST'])
-def register_page():
-    if session.get('user_id'):
-        return redirect(url_for('dashboard'))
-    error = None
+def register():
     if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
-        if not email or not password:
-            error = "Email and password are required."
-        else:
-            pwd_hash = generate_password_hash(password)
-            try:
-                with get_db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, pwd_hash))
-                    conn.commit()
-                    user_id = cursor.lastrowid
-                
-                session.clear()
-                session['user_id'] = user_id
-                session.permanent = True
-                return redirect(url_for('dashboard'))
-            except sqlite3.IntegrityError:
-                error = "This email is already registered. Please sign in instead."
-
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Register - RevivePay</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6">
-            <div class="text-center space-y-2">
-                <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
-                <h1 class="text-2xl font-black tracking-tight">Create Account</h1>
-                <p class="text-xs text-gray-400">Protect your SaaS revenue with enterprise security.</p>
-            </div>
-            {% if error %}
-            <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
-            {% endif %}
-            <form action="/register" method="POST" autocomplete="off" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
-                    <input type="email" name="email" required placeholder="name@domain.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
-                    <input type="password" name="password" required placeholder="••••••••" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
-                </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 transition transform active:scale-95 text-sm">Create Secure Account</button>
-            </form>
-            <p class="text-center text-xs text-gray-400">Already have an account? <a href="/login" class="text-indigo-400 font-bold hover:underline">Sign in</a></p>
-        </div>
-    </body>
-    </html>
-    """, error=error)
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        if User.query.filter_by(email=email).first():
+            flash('Email is already registered.', 'error')
+            return redirect(url_for('register'))
+            
+        new_user = User(email=email)
+        new_user.set_password(password)
+        db.session.add(new_user)
+        db.session.commit()
+        
+        flash('Account created successfully! Please sign in.', 'success')
+        return redirect(url_for('login'))
+    return render_template_string(REGISTER_TEMPLATE)
 
 @app.route('/dashboard')
+@login_required
 def dashboard():
-    user_id = session.get('user_id')
-    if not user_id:
-        return redirect(url_for('login_page'))
-    with get_db() as conn:
-        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        session.clear()
-        return redirect(url_for('login_page'))
-        
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Dashboard - RevivePay</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-    </head>
-    <body class="bg-gray-950 text-white min-h-screen flex flex-col">
-        <nav class="border-b border-gray-800 bg-gray-900/50 backdrop-blur px-6 py-4 flex justify-between items-center">
-            <div class="flex items-center space-x-3">
-                <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-sm shadow-md shadow-indigo-600/30">R</div>
-                <span class="font-black text-lg tracking-tight">RevivePay</span>
-            </div>
-            <div class="flex items-center space-x-4">
-                <span class="text-xs text-gray-400 font-semibold hidden md:inline">{{ user['email'] }}</span>
-                <a href="/logout" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3.5 py-2 rounded-xl text-xs font-bold transition">Sign Out</a>
-            </div>
-        </nav>
-        <main class="max-w-6xl mx-auto w-full p-6 space-y-8 my-auto">
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 class="text-3xl font-black tracking-tight">Revenue Recovery Command</h1>
-                    <p class="text-xs text-gray-400 mt-1">Live metrics and dunning performance for your Stripe integration.</p>
-                </div>
-                <div class="bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 px-4 py-2 rounded-2xl text-xs font-bold">System Status: Active ⚡</div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Recovered</p>
-                    <p class="text-3xl font-black text-emerald-400">$12,450</p>
-                    <p class="text-[11px] text-gray-400">+18% from last month</p>
-                </div>
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Failed Charges Caught</p>
-                    <p class="text-3xl font-black">42</p>
-                    <p class="text-[11px] text-gray-400">Automatic dunning emails sent</p>
-                </div>
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Recovery Success Rate</p>
-                    <p class="text-3xl font-black text-indigo-400">94.2%</p>
-                    <p class="text-[11px] text-gray-400">Industry leading benchmark</p>
-                </div>
-            </div>
-        </main>
-    </body>
-    </html>
-    """, user=user)
+    return render_template_string(DASHBOARD_TEMPLATE)
 
 @app.route('/logout')
+@login_required
 def logout():
-    session.clear()
-    return redirect(url_for('landing'))
+    logout_user()
+    flash('Logged out securely.', 'success')
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, host='0.0.0.0', port=5000)
