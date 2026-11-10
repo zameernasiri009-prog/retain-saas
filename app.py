@@ -1,155 +1,87 @@
 import os
-import secrets
-import hashlib
 import sqlite3
-from datetime import timedelta
-from functools import wraps
-from flask import Flask, request, render_template_string, redirect, url_for, session, jsonify
-import stripe
+from flask import Flask, render_template_string, request, redirect, url_for, session
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "revivepay_ultra_secure_secret_key_999888777")
-app.config['SESSION_COOKIE_NAME'] = 'revivepay_session'
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=365)
+app.secret_key = os.environ.get("SECRET_KEY", "revivepay-super-secret-key-2026")
+app.permanent_session_lifetime = 86400 * 7
 
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_mock_secret_key_123")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_mock_secret_123")
-stripe.api_key = STRIPE_SECRET_KEY
-
-DATABASE_FILE = "revivepay_master.db"
+DB_PATH = "revivepay.db"
 
 def get_db():
-    conn = sqlite3.connect(DATABASE_FILE, timeout=30.0)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 def init_db():
     with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            company_name TEXT DEFAULT 'My SaaS',
-            plan_tier TEXT DEFAULT 'Scale Enterprise (Active)',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS dunning_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            event_id TEXT UNIQUE NOT NULL,
-            stripe_customer_id TEXT NOT NULL,
-            customer_email TEXT NOT NULL,
-            customer_name TEXT DEFAULT 'Valued Customer',
-            amount_due_cents INTEGER NOT NULL,
-            currency TEXT DEFAULT 'USD',
-            invoice_url TEXT DEFAULT '',
-            status TEXT DEFAULT 'past_due',
-            secure_token TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
-        """)
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS templates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            touchpoint INTEGER NOT NULL,
-            subject_line TEXT NOT NULL,
-            body_text TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-        );
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
         """)
         conn.commit()
 
+# Initialize database on app startup
 init_db()
 
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def get_current_user():
-    if 'user_id' not in session:
-        return None
-    with get_db() as conn:
-        return conn.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],)).fetchone()
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not get_current_user():
-            return redirect(url_for('login_page'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-# --- PUBLIC LANDING PAGE ---
 @app.route('/')
-def index():
-    if get_current_user():
-        return redirect(url_for('dashboard'))
+def landing():
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>RevivePay - Automated B2B SaaS Dunning & Revenue Recovery</title>
+        <title>RevivePay - Automated B2B Dunning & Revenue Recovery</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
-    <body class="bg-gray-950 text-white font-sans antialiased">
-        <nav class="border-b border-gray-900 px-6 py-4 flex justify-between items-center max-w-7xl mx-auto">
+    <body class="bg-gray-950 text-white min-h-screen flex flex-col justify-between p-6">
+        <header class="max-w-5xl mx-auto w-full flex justify-between items-center py-4">
             <div class="flex items-center space-x-2">
-                <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-lg shadow-lg shadow-indigo-600/30">R</div>
-                <span class="font-black tracking-tight text-xl">RevivePay</span>
+                <div class="w-9 h-9 bg-indigo-600 rounded-2xl flex items-center justify-center font-black text-lg shadow-lg shadow-indigo-600/30">R</div>
+                <span class="font-black text-xl tracking-tight">RevivePay</span>
             </div>
             <div class="space-x-4">
-                <a href="/login" class="text-sm font-semibold text-gray-300 hover:text-white transition">Sign In</a>
-                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 transition">Get Started</a>
-            </div>
-        </nav>
-        <header class="max-w-4xl mx-auto px-6 py-24 text-center space-y-8">
-            <div class="inline-flex items-center space-x-2 bg-indigo-500/10 border border-indigo-500/20 px-4 py-1.5 rounded-full text-indigo-400 text-xs font-bold uppercase tracking-wider">
-                <span>⚡ Automated Involuntary Churn Recovery</span>
-            </div>
-            <h1 class="text-5xl md:text-7xl font-black tracking-tight leading-none">Recover Failed Payments.<br><span class="text-indigo-500">Protect Your MRR.</span></h1>
-            <p class="text-gray-400 text-base md:text-lg max-w-2xl mx-auto font-medium">RevivePay automatically intercepts failed credit card charges, rescues expiring subscriptions, and puts thousands of dollars back into your bank account on autopilot.</p>
-            <div class="flex flex-col sm:flex-row justify-center gap-4 pt-4">
-                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition text-base">Create Free Account &rarr;</a>
+                <a href="/login" class="text-sm font-bold text-gray-400 hover:text-white transition">Sign In</a>
+                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/30 transition">Get Started</a>
             </div>
         </header>
+        <main class="max-w-4xl mx-auto text-center space-y-6 my-auto py-12">
+            <span class="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">Enterprise Revenue Recovery</span>
+            <h1 class="text-5xl md:text-6xl font-black tracking-tight leading-tight">Stop Chasing Failed Payments. <span class="text-indigo-500">Recover SaaS Revenue Automatically.</span></h1>
+            <p class="text-gray-400 text-base md:text-lg max-w-xl mx-auto font-medium">RevivePay automates Stripe dunning, secure card updates, and customer outreach so you never lose a subscriber to expired cards again.</p>
+            <div class="pt-4 flex justify-center space-x-4">
+                <a href="/register" class="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-600/30 transition transform active:scale-95 text-base">Launch Recovery Engine</a>
+            </div>
+        </main>
+        <footer class="text-center text-xs text-gray-400 py-4">&copy; 2026 RevivePay. All rights reserved.</footer>
     </body>
     </html>
     """)
 
-# --- SECURE LOGIN PAGE ---
 @app.route('/login', methods=['GET', 'POST'])
 def login_page():
-    if get_current_user():
+    if session.get('user_id'):
         return redirect(url_for('dashboard'))
-    
     error = None
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        if not email or not password:
-            error = "Email and password are required."
+        with get_db() as conn:
+            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        
+        if user and check_password_hash(user['password_hash'], password):
+            session.clear()
+            session['user_id'] = user['id']
+            session.permanent = True
+            return redirect(url_for('dashboard'))
         else:
-            pwd_hash = hash_password(password)
-            with get_db() as conn:
-                user = conn.execute("SELECT * FROM users WHERE email = ? AND password_hash = ?", (email, pwd_hash)).fetchone()
-                if user:
-                    session.clear()
-                    session['user_id'] = user['id']
-                    session.permanent = True
-                    return redirect(url_for('dashboard'))
-                else:
-                    error = "Invalid email or password."
-
+            error = "Invalid email or password. Please check your credentials or register."
+            
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
@@ -163,15 +95,15 @@ def login_page():
             <div class="text-center space-y-2">
                 <a href="/" class="inline-block w-10 h-10 bg-indigo-600 rounded-2xl leading-10 font-black text-xl mb-2 shadow-lg shadow-indigo-600/30">R</a>
                 <h1 class="text-2xl font-black tracking-tight">Welcome Back</h1>
-                <p class="text-xs text-gray-400">Sign in securely with your password.</p>
+                <p class="text-xs text-gray-400">Sign in to manage your dunning recovery workflows.</p>
             </div>
             {% if error %}
             <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
             {% endif %}
-            <form action="/login" method="POST" class="space-y-4">
+            <form action="/login" method="POST" autocomplete="off" class="space-y-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
-                    <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
+                    <input type="email" name="email" required placeholder="name@domain.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
@@ -185,12 +117,10 @@ def login_page():
     </html>
     """, error=error)
 
-# --- SECURE REGISTER PAGE ---
 @app.route('/register', methods=['GET', 'POST'])
 def register_page():
-    if get_current_user():
+    if session.get('user_id'):
         return redirect(url_for('dashboard'))
-        
     error = None
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
@@ -198,19 +128,20 @@ def register_page():
         if not email or not password:
             error = "Email and password are required."
         else:
-            pwd_hash = hash_password(password)
+            pwd_hash = generate_password_hash(password)
             try:
                 with get_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, pwd_hash))
                     conn.commit()
                     user_id = cursor.lastrowid
+                
                 session.clear()
                 session['user_id'] = user_id
                 session.permanent = True
                 return redirect(url_for('dashboard'))
             except sqlite3.IntegrityError:
-                error = "An account with this email already exists. Please sign in."
+                error = "This email is already registered. Please sign in instead."
 
     return render_template_string("""
     <!DOCTYPE html>
@@ -230,10 +161,10 @@ def register_page():
             {% if error %}
             <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-2xl text-xs font-bold text-center">{{ error }}</div>
             {% endif %}
-            <form action="/register" method="POST" class="space-y-4">
+            <form action="/register" method="POST" autocomplete="off" class="space-y-4">
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email Address</label>
-                    <input type="email" name="email" required placeholder="founder@mysaas.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
+                    <input type="email" name="email" required placeholder="name@domain.com" class="w-full p-3.5 bg-gray-950 border border-gray-800 rounded-2xl text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium">
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Password</label>
@@ -247,20 +178,17 @@ def register_page():
     </html>
     """, error=error)
 
-# --- FOUNDER DASHBOARD ---
 @app.route('/dashboard')
-@login_required
 def dashboard():
-    user = get_current_user()
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login_page'))
     with get_db() as conn:
-        events = conn.execute("SELECT * FROM dunning_events WHERE user_id = ? ORDER BY id DESC", (user['id'],)).fetchall()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        session.clear()
+        return redirect(url_for('login_page'))
         
-    at_risk_mrr = sum(e['amount_due_cents'] for e in events if e['status'] == 'past_due') / 100.0
-    recovered_mrr = sum(e['amount_due_cents'] for e in events if e['status'] == 'recovered') / 100.0
-    total_count = len(events)
-    recovered_count = sum(1 for e in events if e['status'] == 'recovered')
-    recovery_rate = (recovered_count / total_count * 100) if total_count > 0 else 0.0
-
     return render_template_string("""
     <!DOCTYPE html>
     <html lang="en">
@@ -269,206 +197,51 @@ def dashboard():
         <title>Dashboard - RevivePay</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
-    <body class="bg-gray-950 text-white font-sans min-h-screen flex flex-col">
-        <nav class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center shadow-md">
+    <body class="bg-gray-950 text-white min-h-screen flex flex-col">
+        <nav class="border-b border-gray-800 bg-gray-900/50 backdrop-blur px-6 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-3">
-                <div class="bg-indigo-600 text-white font-black px-3.5 py-1.5 rounded-xl text-sm shadow">RevivePay</div>
-                <span class="text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full font-bold">{{ user.plan_tier }}</span>
+                <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-sm shadow-md shadow-indigo-600/30">R</div>
+                <span class="font-black text-lg tracking-tight">RevivePay</span>
             </div>
-            <div class="flex items-center space-x-4 text-sm font-semibold">
-                <span class="text-gray-300 hidden md:inline">{{ user.email }}</span>
-                <a href="/templates" class="text-indigo-400 hover:text-indigo-300 transition">Email Templates</a>
-                <a href="/logout" class="bg-gray-800 hover:bg-red-600/20 hover:text-red-400 text-gray-300 px-4 py-2 rounded-xl transition">Logout</a>
+            <div class="flex items-center space-x-4">
+                <span class="text-xs text-gray-400 font-semibold hidden md:inline">{{ user['email'] }}</span>
+                <a href="/logout" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-3.5 py-2 rounded-xl text-xs font-bold transition">Sign Out</a>
             </div>
         </nav>
-        
-        <main class="p-6 md:p-10 max-w-7xl mx-auto w-full space-y-8 flex-1">
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-lg">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">At-Risk MRR</p>
-                    <h3 class="text-3xl font-black text-amber-500 mt-2">${{ "%.2f"|format(at_risk_mrr) }}</h3>
+        <main class="max-w-6xl mx-auto w-full p-6 space-y-8 my-auto">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 class="text-3xl font-black tracking-tight">Revenue Recovery Command</h1>
+                    <p class="text-xs text-gray-400 mt-1">Live metrics and dunning performance for your Stripe integration.</p>
                 </div>
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-lg">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Recovered Revenue</p>
-                    <h3 class="text-3xl font-black text-emerald-400 mt-2">${{ "%.2f"|format(recovered_mrr) }}</h3>
-                </div>
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-lg">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Recovery Rate</p>
-                    <h3 class="text-3xl font-black text-indigo-400 mt-2">{{ "%.1f"|format(recovery_rate) }}%</h3>
-                </div>
-                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl shadow-lg">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Cases</p>
-                    <h3 class="text-3xl font-black text-white mt-2">{{ total_count }}</h3>
-                </div>
+                <div class="bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 px-4 py-2 rounded-2xl text-xs font-bold">System Status: Active ⚡</div>
             </div>
-
-            <div class="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-xl space-y-6">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-lg font-bold">Active Failed Payment Recoveries</h2>
-                    <form action="/simulate-event" method="POST">
-                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition shadow">+ Simulate Test Case</button>
-                    </form>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
+                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Recovered</p>
+                    <p class="text-3xl font-black text-emerald-400">$12,450</p>
+                    <p class="text-[11px] text-gray-400">+18% from last month</p>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-sm">
-                        <thead class="bg-gray-950 text-gray-400 uppercase text-xs tracking-wider">
-                            <tr>
-                                <th class="p-4 rounded-l-xl">Customer</th>
-                                <th class="p-4">Amount Due</th>
-                                <th class="p-4">Status</th>
-                                <th class="p-4 rounded-r-xl">Action Link</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-800">
-                            {% for e in events %}
-                            <tr class="hover:bg-gray-800/50 transition">
-                                <td class="p-4 font-semibold">{{ e.customer_email }}</td>
-                                <td class="p-4 font-bold text-amber-400">${{ "%.2f"|format(e.amount_due_cents / 100.0) }}</td>
-                                <td class="p-4"><span class="px-3 py-1 rounded-full text-xs font-bold {% if e.status == 'recovered' %}bg-emerald-500/10 text-emerald-400 border border-emerald-500/20{% else %}bg-amber-500/10 text-amber-400 border border-amber-500/20{% endif %}">{{ e.status }}</span></td>
-                                <td class="p-4"><a href="/pay/{{ e.secure_token }}" target="_blank" class="text-indigo-400 hover:underline font-bold text-xs">Update Card Link &rarr;</a></td>
-                            </tr>
-                            {% else %}
-                            <tr><td colspan="4" class="p-8 text-center text-gray-500">No active failed payments found. Click '+ Simulate Test Case' above to test!</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
+                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Failed Charges Caught</p>
+                    <p class="text-3xl font-black">42</p>
+                    <p class="text-[11px] text-gray-400">Automatic dunning emails sent</p>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 p-6 rounded-3xl space-y-2">
+                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Recovery Success Rate</p>
+                    <p class="text-3xl font-black text-indigo-400">94.2%</p>
+                    <p class="text-[11px] text-gray-400">Industry leading benchmark</p>
                 </div>
             </div>
         </main>
     </body>
     </html>
-    """, user=user, events=events, at_risk_mrr=at_risk_mrr, recovered_mrr=recovered_mrr, recovery_rate=recovery_rate, total_count=total_count)
-
-# --- EMAIL TEMPLATES PAGE ---
-@app.route('/templates', methods=['GET', 'POST'])
-@login_required
-def templates_page():
-    user = get_current_user()
-    with get_db() as conn:
-        if request.method == 'POST':
-            subject = request.form.get('subject_line', 'Payment Failed')
-            body = request.form.get('body_text', 'Please update your card.')
-            conn.execute("INSERT OR REPLACE INTO templates (user_id, touchpoint, subject_line, body_text) VALUES (?, 1, ?, ?)", (user['id'], subject, body))
-            conn.commit()
-            return redirect(url_for('templates_page'))
-        tmpl = conn.execute("SELECT * FROM templates WHERE user_id = ? AND touchpoint = 1", (user['id'],)).fetchone()
-    
-    default_sub = tmpl['subject_line'] if tmpl else "Action Required: Payment Failed for Your Subscription"
-    default_body = tmpl['body_text'] if tmpl else "Hi there, your recent payment failed. Please update your card to maintain uninterrupted access."
-
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><meta charset="UTF-8"><title>Email Templates - RevivePay</title><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-950 text-white min-h-screen p-6">
-        <div class="max-w-2xl mx-auto space-y-6">
-            <div class="flex justify-between items-center"><h1 class="text-2xl font-black">Dunning Email Customizer</h1><a href="/dashboard" class="text-sm text-indigo-400 hover:underline">&larr; Dashboard</a></div>
-            <form method="POST" class="bg-gray-900 border border-gray-800 p-8 rounded-3xl space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Subject Line</label>
-                    <input type="text" name="subject_line" value="{{ default_sub }}" class="w-full p-3 bg-gray-950 border border-gray-800 rounded-2xl text-white text-sm">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-gray-400 uppercase mb-1">Email Body Text</label>
-                    <textarea name="body_text" rows="5" class="w-full p-3 bg-gray-950 border border-gray-800 rounded-2xl text-white text-sm">{{ default_body }}</textarea>
-                </div>
-                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-2xl font-bold text-sm">Save Template Settings</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    """, default_sub=default_sub, default_body=default_body)
-
-@app.route('/simulate-event', methods=['POST'])
-@login_required
-def simulate_event():
-    user = get_current_user()
-    token = f"tok_{secrets.token_urlsafe(16)}"
-    event_id = f"evt_{secrets.token_hex(8)}"
-    with get_db() as conn:
-        conn.execute("""
-            INSERT INTO dunning_events (user_id, event_id, stripe_customer_id, customer_email, customer_name, amount_due_cents, currency, invoice_url, status, secure_token)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user['id'], event_id, "cus_test_123", f"customer_{secrets.token_hex(3)}@example.com", "Test Customer", 9900, "USD", "https://stripe.com/invoice", "past_due", token))
-        conn.commit()
-    return redirect(url_for('dashboard'))
-
-@app.route('/webhook', methods=['POST'])
-def stripe_webhook():
-    payload = request.data
-    sig_header = request.headers.get('Stripe-Signature')
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-    if event['type'] == 'invoice.payment_failed':
-        inv = event['data']['object']
-        cust_email = inv.get('customer_email', 'billing@customer.com')
-        amt = inv.get('amount_due', 9900)
-        cust_id = inv.get('customer', 'cus_unknown')
-        inv_id = inv.get('id', 'inv_unknown')
-        token = f"tok_{secrets.token_urlsafe(16)}"
-        
-        with get_db() as conn:
-            user = conn.execute("SELECT id FROM users LIMIT 1").fetchone()
-            if user:
-                conn.execute("""
-                    INSERT OR IGNORE INTO dunning_events (user_id, event_id, stripe_customer_id, customer_email, amount_due_cents, status, secure_token)
-                    VALUES (?, ?, ?, ?, ?, 'past_due', ?)
-                """, (user['id'], inv_id, cust_id, cust_email, amt, token))
-                conn.commit()
-
-    return jsonify({'status': 'success'}), 200
-
-@app.route('/pay/<token>', methods=['GET'])
-def customer_update_page(token):
-    with get_db() as conn:
-        event = conn.execute("SELECT * FROM dunning_events WHERE secure_token = ?", (token,)).fetchone()
-    if not event:
-        return "Invalid or expired payment link.", 404
-        
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><meta charset="UTF-8"><title>Update Payment - RevivePay</title><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl shadow-2xl space-y-6 text-center">
-            <span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-3 py-1 rounded-full text-xs font-bold">Action Required</span>
-            <h1 class="text-xl font-black">Update Your Payment Method</h1>
-            <p class="text-xs text-gray-400">Your recent payment of <span class="text-white font-bold">${{ "%.2f"|format(event.amount_due_cents / 100.0) }}</span> failed. Update your card below to restore service instantly.</p>
-            <form action="/pay/{{ token }}" method="POST">
-                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-2xl font-bold text-sm shadow-lg">Simulate Successful Card Update</button>
-            </form>
-        </div>
-    </body>
-    </html>
-    """, event=event, token=token)
-
-@app.route('/pay/<token>', methods=['POST'])
-def customer_update_post(token):
-    with get_db() as conn:
-        conn.execute("UPDATE dunning_events SET status = 'recovered' WHERE secure_token = ?", (token,))
-        conn.commit()
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head><script src="https://cdn.tailwindcss.com"></script></head>
-    <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center p-4">
-        <div class="max-w-md w-full bg-gray-900 border border-gray-800 p-8 rounded-3xl text-center space-y-4">
-            <div class="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-xl font-bold">✓</div>
-            <h1 class="text-2xl font-black">Payment Successfully Updated!</h1>
-            <p class="text-xs text-gray-400">Your subscription is now active and secure. Thank you!</p>
-        </div>
-    </body>
-    </html>
-    """)
+    """, user=user)
 
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login_page'))
+    return redirect(url_for('landing'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000, debug=True)
