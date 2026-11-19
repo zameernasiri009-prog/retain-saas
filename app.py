@@ -138,7 +138,7 @@ MCQ_QUESTIONS = [
             "C) don't / are",
         ],
         "answer": "A) aren't / 're",
-        "explanation": "With plural 'they' and 'we' in 'be' sentences, use 'aren't' and "'re" (are).",
+        "explanation": "With plural 'they' and 'we' in 'be' sentences, use 'aren't' and 're (are).",
     },
     {
         "id": 4,
