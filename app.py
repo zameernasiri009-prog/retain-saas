@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import time
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -234,6 +233,14 @@ SPEAKING_15_ITEMS = [
 ]
 
 
+def render_html_box(html_str: str, height: int | str = "content", alt: str = "Embedded widget"):
+    if hasattr(st, "iframe"):
+        st.iframe(html_str, height=height, alt=alt)
+    else:
+        fixed_h = 140 if height == "content" else int(height)
+        components.html(html_str, height=fixed_h)
+
+
 def get_api_key() -> str:
     try:
         if "OPENAI_API_KEY" in st.secrets and st.secrets["OPENAI_API_KEY"]:
@@ -247,7 +254,7 @@ def listen_button(text: str, key_id: str):
     lines = text if isinstance(text, list) else [text]
     payload = json.dumps(lines)
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
-    components.html(
+    render_html_box(
         f"""
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:sans-serif;">
             <button type="button" id="listen_btn_{safe_id}" onclick="readAloud_{safe_id}()"
@@ -286,13 +293,14 @@ def listen_button(text: str, key_id: str):
         }}
         </script>
         """,
-        height=54,
+        height=56,
+        alt="Listen button",
     )
 
 
 def mic_recorder(key_id: str, item_no: int):
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
-    components.html(
+    render_html_box(
         f"""
         <div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -433,13 +441,14 @@ def mic_recorder(key_id: str, item_no: int):
         }}
         </script>
         """,
-        height=135,
+        height="content",
+        alt="Microphone recorder",
     )
 
 
 def submit_bridge_button(item_no: int, key_id: str):
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
-    components.html(
+    render_html_box(
         f"""
         <div style="font-family:sans-serif;margin-top:4px;">
             <button type="button" id="sub_btn_{safe_id}" onclick="doSubmit_{safe_id}()"
@@ -468,7 +477,8 @@ def submit_bridge_button(item_no: int, key_id: str):
         }}
         </script>
         """,
-        height=44,
+        height=48,
+        alt="Submit recording button",
     )
 
 
