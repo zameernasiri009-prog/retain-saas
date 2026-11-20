@@ -242,12 +242,16 @@ def render_html_box(html_str: str, height: int | str = "content", alt: str = "Em
 
 
 def get_api_key() -> str:
-    try:
-        if "OPENAI_API_KEY" in st.secrets and st.secrets["OPENAI_API_KEY"]:
-            return str(st.secrets["OPENAI_API_KEY"]).strip()
-    except Exception:
-        pass
-    return os.environ.get("OPENAI_API_KEY", "").strip()
+    for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+        try:
+            if key_name in st.secrets and st.secrets[key_name]:
+                return str(st.secrets[key_name]).strip()
+        except Exception:
+            pass
+        env_val = os.environ.get(key_name, "").strip()
+        if env_val:
+            return env_val
+    return ""
 
 
 def listen_button(text: str, key_id: str):
@@ -594,40 +598,37 @@ def ai_check_speaking(
 
     if api_key and clean_tx:
         try:
-            from openai import OpenAI
+            from google import genai
 
-            client = OpenAI(api_key=api_key)
+            client = genai.Client(api_key=api_key)
             prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-            response = client.responses.create(
-                model="gpt-4o-mini",
-                input=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a friendly English tutor for absolute beginners. "
-                            "Check the student's spoken transcript against the questions using simple, easy beginner words. "
-                            "Return ONLY valid JSON with keys: "
-                            "passed (boolean), "
-                            "correct (list of short simple strings showing what grammar or answers are right), "
-                            "mistakes (list of short simple strings showing what grammar or answers are wrong), "
-                            "better (list of short simple 'Try saying: ...' strings)."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Questions:\n{prompt_block}\n\nStudent spoken words:\n{clean_tx}",
-                    },
-                ],
+            prompt = (
+                "You are a friendly, strict, accurate English tutor for absolute beginners. "
+                "Check EVERY spoken sentence/phrase in the student's transcript against the questions "
+                "for grammar, missing verbs like 'am/is/are', missing prepositions like 'from', "
+                "and unclear/choppy phrasing using simple beginner English.\n"
+                "Return ONLY valid JSON with these exact keys:\n"
+                "- passed: boolean (true only if the grammar and answers are genuinely correct)\n"
+                "- correct: list of short strings for parts that are actually right\n"
+                "- mistakes: list of short strings for every grammar or phrasing mistake\n"
+                "- better: list of short 'Try saying: ...' examples\n\n"
+                f"Questions:\n{prompt_block}\n\n"
+                f"Student spoken words:\n{clean_tx}"
             )
-            raw_text = (getattr(response, "output_text", "") or "").strip()
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            raw_text = (getattr(response, "text", "") or "").strip()
             json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
             data = json.loads(json_match.group(0) if json_match else raw_text)
 
+            mistakes_list = [str(x) for x in data.get("mistakes", []) if x]
             return {
-                "passed": bool(data.get("passed", len(data.get("mistakes", [])) == 0)),
+                "passed": bool(data.get("passed", len(mistakes_list) == 0)) and len(mistakes_list) == 0,
                 "transcript": clean_tx,
                 "correct": [str(x) for x in data.get("correct", []) if x],
-                "mistakes": [str(x) for x in data.get("mistakes", []) if x],
+                "mistakes": mistakes_list,
                 "better": [str(x) for x in data.get("better", []) if x],
             }
         except Exception:
