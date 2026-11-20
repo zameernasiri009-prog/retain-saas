@@ -501,7 +501,7 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
         if has_audio:
             correct.append("Voice recording was captured.")
             mistakes.append("No clear English words were picked up yet. Speak clearly into the mic and tap Submit.")
-            better.append("Try saying: 'My name is Zameer. I am from Tajikistan.'")
+            better.append("Try saying: 'No, I am not on holiday. No, I am not late. No, I am not from England.'")
         else:
             mistakes.append("Tap Mic, speak your answer, tap Stop, and tap Submit.")
             better.append("Try saying: 'My name is Zameer.'")
@@ -512,6 +512,16 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
             "mistakes": mistakes,
             "better": better,
         }
+
+    if re.search(r"\bi\s+not\b", lower):
+        mistakes.append("Use 'am not' (or \"'m not\") with 'I', not 'I not' (for example: 'I am not late').")
+        better.append("Try saying: 'No, I am not late.'")
+
+    if re.search(r"\b(he|she|it)\s+not\b", lower):
+        mistakes.append("Use 'is not' (or \"isn't\") with 'he', 'she', or 'it', not just 'not'.")
+
+    if re.search(r"\b(we|they|you)\s+not\b", lower):
+        mistakes.append("Use 'are not' (or \"aren't\") with 'we', 'they', or 'you', not just 'not'.")
 
     if re.search(r"\b(my name|this|that|it|he|she)\s+(zameer|zamir|ali|ahmed|sara|good|fine|okay|ok|here|there|from)\b", lower):
         if not re.search(r"\b(my name|this|that|it|he|she)\s+(is|'s|was)\b", lower):
@@ -535,14 +545,21 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
         mistakes.append("With 'we', 'they', or 'you', use 'are'.")
         better.append("Try saying: 'We are ...' or 'They are ...'")
 
+    if re.search(r"\b(am|is|are|not)\s+(england|russia|egypt|mexico|canada|turkey|tajikistan|america|china|spain|france|germany)\b", lower):
+        mistakes.append("Use 'from' before a country or place when saying where someone is from (for example: 'not from England').")
+        better.append("Try saying: 'No, I am not from England.'")
+
     if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
         mistakes.append("With 'he', 'she', or 'it', add '-s' or '-es' to the verb (for example: 'has', 'does', 'goes', 'lives', 'works').")
 
     if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
         mistakes.append("Use 'an' before a vowel sound (for example: 'an orange', 'an old house', 'an umbrella').")
 
-    if len(words) >= 2 and not mistakes:
-        correct.append(f"Clear sentence structure heard ({len(words)} words).")
+    if re.search(r"\b(no\s+i\s+am\s+no|i\s+am\s+no|no\s+no)\b", lower):
+        mistakes.append("Avoid repeating 'no' or cutting off mid-sentence—pause briefly and say each full answer clearly.")
+
+    if re.search(r"\b(i\s+am\s+not|i'm\s+not)\s+on\s+(a\s+)?holiday\b", lower):
+        correct.append("'I am not on holiday' is clear and grammatically right.")
 
     if any(q.lower().startswith("what's your name") for q in questions) and re.search(r"\b(my name is|i am|i'm)\b", lower):
         correct.append("Answered the name question clearly.")
@@ -550,12 +567,13 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
     if any("where are you from" in q.lower() for q in questions) and re.search(r"\b(from|am from|'m from)\b", lower):
         correct.append("Answered where you are from clearly.")
 
-    passed = len(mistakes) == 0 and len(words) >= 2
-    if passed and not correct:
-        correct.append("Your grammar looks good!")
+    if not mistakes and len(words) >= 2:
+        correct.append(f"Clear sentence structure heard ({len(words)} words).")
 
     if not better and mistakes:
-        better.append("Speak in full simple sentences, such as: 'My name is ...' and 'I am from ...'")
+        better.append("Try saying: 'No, I am not on holiday. No, I am not late. No, I am not from England.'")
+
+    passed = len(mistakes) == 0 and len(words) >= 2
 
     return {
         "passed": passed,
