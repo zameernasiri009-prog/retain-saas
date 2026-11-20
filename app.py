@@ -82,7 +82,8 @@ MCQ_QUESTIONS = [
         "pronounce": "Are they Mexican? No, they are not. And we are from Canada.",
         "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
-        "rule": "Plural subjects 'they' and 'we' use 'aren't' and "'re" (are) with the verb 'be'.",
+        "rule": "Plural subjects 'they' and 'we' use 'aren't' and \"'re\" (are) with the verb 'be'.",
+
     },
     {
         "num": 4,
