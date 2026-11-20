@@ -83,7 +83,6 @@ MCQ_QUESTIONS = [
         "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
         "rule": "Plural subjects 'they' and 'we' use 'aren't' and \"'re\" (are) with the verb 'be'.",
-
     },
     {
         "num": 4,
@@ -241,7 +240,7 @@ def get_api_key() -> str:
     return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
-def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
+def speaker(text: str, label: str = "🔊 Listen", key_id: str = "spk"):
     payload = json.dumps(text)
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
     components.html(
@@ -260,7 +259,7 @@ def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
                 const u = new SpeechSynthesisUtterance(t);
                 u.lang = "en-US";
                 u.rate = 0.95;
-                out.textContent = "Speaking...";
+                out.textContent = "Listening...";
                 u.onend = () => {{ out.textContent = ""; }};
                 u.onerror = () => {{ out.textContent = t; }};
                 window.speechSynthesis.speak(u);
@@ -431,7 +430,7 @@ def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> st
         return (
             f"**AI Tutor Feedback — Great job!**\n"
             f"- **Why it works:** {q['rule']}\n"
-            f"- **Next step:** Tap **🔊 Speak** and say the full sentence out loud."
+            f"- **Next step:** Tap **🔊 Listen** and say the full sentence out loud."
         )
     expected = q.get("answer") or q.get("correct", "")
     tips = ["**AI Tutor Feedback — Let's fix this together:**"]
@@ -463,7 +462,7 @@ st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Speak &amp; AI Review</p>
+        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Listen &amp; AI Review</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -484,7 +483,7 @@ if section.startswith("1."):
 
     if q_num <= 10:
         st.markdown(f'<div class="q-prompt">{html.escape(q["prompt"])}</div>', unsafe_allow_html=True)
-        speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
+        speaker(q["pronounce"], label="🔊 Listen", key_id=f"gram_{q_num}")
         selected = st.radio("Choose one option:", q["options"], index=None, key=f"radio_q_{q_num}")
         if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
             if selected is None:
@@ -497,7 +496,7 @@ if section.startswith("1."):
     else:
         st.markdown('<div class="q-prompt">Arrange the mixed words into a full correct sentence:</div>', unsafe_allow_html=True)
         st.code(q["mixed"], language="text")
-        speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
+        speaker(q["pronounce"], label="🔊 Listen", key_id=f"gram_{q_num}")
         typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
         if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
             norm_u = normalize_str(typed)
@@ -540,27 +539,22 @@ else:
     for i, sq in enumerate(three_qs, start=1):
         st.markdown(f"**{i}. {sq}**")
 
-    speaker(" ".join(three_qs), label="🔊 Speak", key_id=f"spk_set_{item_no}")
+    speaker(" ".join(three_qs), label="🔊 Listen", key_id=f"spk_set_{item_no}")
 
     audio_rec = st.audio_input("Record Voice", key=f"audio_rec_{item_no}") if hasattr(st, "audio_input") else None
-    uploaded_voice = st.file_uploader(
-        "Or upload voice recording (if preferred)",
-        type=["wav", "mp3", "m4a", "ogg", "webm"],
-        key=f"up_voice_{item_no}",
-    )
+    st.caption("If the mic shows an error on phone/browser, allow microphone permission or tap the refresh icon on the recorder.")
+
     spoken_words = st.text_area(
-        "Spoken sentences (optional if using audio with an API key, or type/dictate here):",
+        "Spoken sentences:",
         key=f"spoken_words_{item_no}",
         height=90,
-        placeholder="Example: My name is Zameer. I am from Tajikistan. I spell it Z-A-M-E-E-R.",
     )
 
     if st.button("Done", type="primary", key=f"done_{item_no}"):
-        active_audio = audio_rec if audio_rec is not None else uploaded_voice
         st.session_state.sp_grades[item_no] = grade_speaking_response(
             three_qs,
             spoken_words,
-            active_audio,
+            audio_rec,
         )
 
     grade = st.session_state.sp_grades.get(item_no)
