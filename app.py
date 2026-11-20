@@ -1,98 +1,80 @@
-import os
+import json
 import re
 import streamlit as st
-
-try:
-    from gtts import gTTS
-    import io
-
-    HAS_GTTS = True
-except Exception:
-    HAS_GTTS = False
-
-try:
-    from google import genai
-
-    HAS_GENAI = True
-except Exception:
-    HAS_GENAI = False
-
-try:
-    from openai import OpenAI
-
-    HAS_OPENAI = True
-except Exception:
-    HAS_OPENAI = False
-
+import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="Oxford Beginner English Assessment",
-    page_icon="📘",
-    layout="wide",
+    page_title="English Learning Interactive Quiz",
+    page_icon="🎓",
+    layout="centered",
 )
 
 # ---------------------------------------------------------------------------
-# OXFORD-INSPIRED CLEAN STYLING
+# CLEAN MODERN STYLING
 # ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
-        .oxford-header {
-            background: linear-gradient(90deg, #002147 0%, #0F3D75 82%, #C59B27 100%);
-            padding: 18px 24px;
-            border-radius: 8px;
+        .main-banner {
+            background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
+            padding: 20px 24px;
+            border-radius: 12px;
             color: #FFFFFF;
             margin-bottom: 18px;
-            border-bottom: 4px solid #C59B27;
+            border-bottom: 4px solid #F59E0B;
         }
-        .oxford-header h1 {
+        .main-banner h1 {
             margin: 0;
-            font-size: 24px;
+            font-size: 22px;
             color: #FFFFFF;
-            letter-spacing: 0.5px;
+            font-weight: 700;
         }
-        .oxford-header p {
-            margin: 4px 0 0 0;
+        .main-banner p {
+            margin: 6px 0 0 0;
             font-size: 13px;
             color: #E2E8F0;
         }
-        .q-card {
-            background-color: #F8FAFC;
-            border: 1px solid #CBD5E1;
-            border-left: 5px solid #002147;
-            border-radius: 6px;
-            padding: 14px 18px;
-            margin-bottom: 14px;
+        .step-card {
+            background: #FFFFFF;
+            border: 1px solid #E2E8F0;
+            border-left: 5px solid #1E3A8A;
+            border-radius: 10px;
+            padding: 18px 20px;
+            margin: 12px 0 16px 0;
+            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
         }
-        .q-title {
+        .q-badge {
+            display: inline-block;
+            background: #EFF6FF;
+            color: #1E3A8A;
             font-weight: 700;
-            color: #002147;
-            font-size: 15px;
-            margin-bottom: 6px;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            margin-bottom: 8px;
         }
-        .speak-box {
-            background-color: #FFFBEB;
-            border: 1px solid #FDE68A;
-            border-left: 5px solid #C59B27;
-            border-radius: 6px;
+        .q-prompt {
+            font-size: 18px;
+            font-weight: 600;
+            color: #0F172A;
+            margin: 6px 0 12px 0;
+            line-height: 1.45;
+        }
+        .tutor-box {
+            background: #F8FAFC;
+            border: 1px solid #CBD5E1;
+            border-left: 5px solid #0F766E;
+            border-radius: 10px;
             padding: 14px 18px;
-            margin-bottom: 14px;
+            margin-top: 12px;
         }
-        .badge-ok {
-            color: #166534;
-            background-color: #DCFCE7;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 13px;
-        }
-        .badge-err {
-            color: #991B1B;
-            background-color: #FEE2E2;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 13px;
+        .speak-card {
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+            border-left: 5px solid #D97706;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin: 12px 0;
         }
     </style>
     """,
@@ -101,148 +83,120 @@ st.markdown(
 
 
 # ---------------------------------------------------------------------------
-# QUESTION BANK (1–10 MCQ, 11–15 SENTENCE REWRITE, SPEAKING ITEMS)
+# QUIZ DATA: 10 MULTIPLE CHOICE + 5 SENTENCE REWRITE + 15 SPEAKING ITEMS
 # ---------------------------------------------------------------------------
 MCQ_QUESTIONS = [
     {
-        "id": 1,
+        "num": 1,
+        "type": "Multiple Choice",
         "prompt": "You ___ in class 2, and ___ she from Turkey?",
-        "audio_text": "You are in class two, and is she from Turkey?",
-        "options": [
-            "A) are / is",
-            "B) am / are",
-            "C) is / am",
-        ],
+        "pronounce": "You are in class two, and is she from Turkey?",
+        "options": ["A) are / is", "B) am / are", "C) is / am"],
         "answer": "A) are / is",
-        "explanation": "Use 'are' with 'you' and 'is' with singular third-person 'she'.",
+        "rule": "Use 'are' with 'you' and 'is' with third-person singular 'she'.",
     },
     {
-        "id": 2,
+        "num": 2,
+        "type": "Multiple Choice",
         "prompt": '"___ is she?" — "She\'s ten." And "___\'s he from?"',
-        "audio_text": "How old is she? She's ten. And where's he from?",
-        "options": [
-            "A) Where / How old",
-            "B) How old / Where",
-            "C) Who / When",
-        ],
+        "pronounce": "How old is she? She's ten. And where's he from?",
+        "options": ["A) Where / How old", "B) How old / Where", "C) Who / When"],
         "answer": "B) How old / Where",
-        "explanation": "'How old' asks about age ('She's ten'), and 'Where' asks about origin/place.",
+        "rule": "'How old' asks about age, while 'Where' asks about origin or place.",
     },
     {
-        "id": 3,
+        "num": 3,
+        "type": "Multiple Choice",
         "prompt": '"Are they Mexican?" — "No, they ___." And "We ___ from Canada."',
-        "audio_text": "Are they Mexican? No, they aren't. And we're from Canada.",
-        "options": [
-            "A) aren't / 're",
-            "B) isn't / is",
-            "C) don't / are",
-        ],
+        "pronounce": "Are they Mexican? No, they aren't. And we're from Canada.",
+        "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
-        "explanation": "With plural 'they' and 'we' in 'be' sentences, use 'aren't' and 're (are).",
+        "rule": "Plural subjects 'they' and 'we' use 'aren't' and 're (are) with the verb 'be'.",
     },
     {
-        "id": 4,
-        "prompt": "Which question is correct?",
-        "audio_text": "How old is she?",
-        "options": [
-            "A) How old's she?",
-            "B) Where's he?",
-            "C) How old is she?",
-        ],
+        "num": 4,
+        "type": "Multiple Choice",
+        "prompt": "Which question is grammatically complete and correct?",
+        "pronounce": "How old is she?",
+        "options": ["A) How old's she?", "B) Where's he?", "C) How old is she?"],
         "answer": "C) How old is she?",
-        "explanation": "'How old is she?' is the standard grammatically full question form (note: 'Where's he?' is also natural, while 'How old's she?' is non-standard).",
+        "rule": "'How old is she?' is the standard full form (never contract 'is' onto 'old' as *old's).",
     },
     {
-        "id": 5,
+        "num": 5,
+        "type": "Multiple Choice",
         "prompt": "I have ___ umbrella, ___ key, and two ___.",
-        "audio_text": "I have an umbrella, a key, and two keys.",
-        "options": [
-            "A) an / a / keys",
-            "B) a / an / keyes",
-            "C) an / an / key",
-        ],
+        "pronounce": "I have an umbrella, a key, and two keys.",
+        "options": ["A) an / a / keys", "B) a / an / keyes", "C) an / an / key"],
         "answer": "A) an / a / keys",
-        "explanation": "'An' before vowel sound in 'umbrella', 'a' before consonant sound in 'key', and plural 'keys'.",
+        "rule": "Use 'an' before a vowel sound ('umbrella'), 'a' before a consonant sound ('key'), and regular plural 'keys'.",
     },
     {
-        "id": 6,
+        "num": 6,
+        "type": "Multiple Choice",
         "prompt": '"What are ___ right here?" — "They\'re keys." And "Who are ___ girls over there?"',
-        "audio_text": "What are these right here? They're keys. And who are those girls over there?",
-        "options": [
-            "A) that / this",
-            "B) these / those",
-            "C) this / that",
-        ],
+        "pronounce": "What are these right here? They're keys. And who are those girls over there?",
+        "options": ["A) that / this", "B) these / those", "C) this / that"],
         "answer": "B) these / those",
-        "explanation": "'These' is plural for things nearby ('right here'), and 'those' is plural for people/things farther away ('over there').",
+        "rule": "'These' refers to plural things close by, and 'those' refers to plural people/things farther away.",
     },
     {
-        "id": 7,
+        "num": 7,
+        "type": "Multiple Choice",
         "prompt": "This is my ___ house, and Senegal is in Africa. ___ flag is red, yellow, and green.",
-        "audio_text": "This is my parents' house, and Senegal is in Africa. Its flag is red, yellow, and green.",
-        "options": [
-            "A) parents' / Its",
-            "B) parent's / It's",
-            "C) parents's / Their",
-        ],
+        "pronounce": "This is my parents' house, and Senegal is in Africa. Its flag is red, yellow, and green.",
+        "options": ["A) parents' / Its", "B) parent's / It's", "C) parents's / Their"],
         "answer": "A) parents' / Its",
-        "explanation": "Plural possessive 'parents'' puts the apostrophe after s, and possessive 'Its' (no apostrophe) modifies 'flag'.",
+        "rule": "Plural possessive ends with an apostrophe after s ('parents''), and possessive 'Its' has no apostrophe.",
     },
     {
-        "id": 8,
+        "num": 8,
+        "type": "Multiple Choice",
         "prompt": "Choose the correct sentence.",
-        "audio_text": "It's a fast car and my glasses are new.",
+        "pronounce": "It's a fast car and my glasses are new.",
         "options": [
             "A) They're olds houses and a car fast.",
             "B) It's a fast car and my glasses are new.",
             "C) An Audi expensive is and she's talls.",
         ],
         "answer": "B) It's a fast car and my glasses are new.",
-        "explanation": "English adjectives do not take plural '-s' and come before the noun ('fast car'), while predicate adjectives follow 'be' ('glasses are new').",
+        "rule": "English adjectives never take plural '-s' and go before nouns ('fast car') or after 'be' ('glasses are new').",
     },
     {
-        "id": 9,
+        "num": 9,
+        "type": "Multiple Choice",
         "prompt": '"___ you live near here?" — "No, I ___." And "We ___ have meat for dinner."',
-        "audio_text": "Do you live near here? No, I don't. And we don't have meat for dinner.",
-        "options": [
-            "A) Do / don't / don't",
-            "B) Does / doesn't / aren't",
-            "C) Are / 'm not / not",
-        ],
+        "pronounce": "Do you live near here? No, I don't. And we don't have meat for dinner.",
+        "options": ["A) Do / don't / don't", "B) Does / doesn't / aren't", "C) Are / 'm not / not"],
         "answer": "A) Do / don't / don't",
-        "explanation": "Present simple with 'you' and 'we' uses 'do' / 'don't' for questions and negatives with main verbs like 'live' and 'have'.",
+        "rule": "Use 'Do' and 'don't' with 'you' and 'we' in present simple questions and negatives.",
     },
     {
-        "id": 10,
+        "num": 10,
+        "type": "Multiple Choice",
         "prompt": "She ___ TV in the evening, and he ___ eats meat.",
-        "audio_text": "She watches TV in the evening, and he never eats meat.",
-        "options": [
-            "A) watch / doesn't never",
-            "B) watches / never",
-            "C) watching / no",
-        ],
+        "pronounce": "She watches TV in the evening, and he never eats meat.",
+        "options": ["A) watch / doesn't never", "B) watches / never", "C) watching / no"],
         "answer": "B) watches / never",
-        "explanation": "Third-person singular 'she' takes 'watches' (-es after -ch), and 'never' expresses zero frequency before 'eats'.",
+        "rule": "Add '-es' for third-person singular 'watches', and use 'never' (not double negatives).",
     },
 ]
 
 REWRITE_QUESTIONS = [
     {
-        "id": 11,
-        "label": "Question 11 (Mixed Words 1)",
-        "tokens": "from / where / you / are / ?",
-        "audio_text": "Where are you from?",
-        "accepted": [
-            "where are you from?",
-            "where are you from",
-        ],
-        "canonical": "Where are you from?",
+        "num": 11,
+        "type": "Sentence Pattern (Mixed Words)",
+        "mixed": "from / where / you / are / ?",
+        "pronounce": "Where are you from?",
+        "accepted": ["where are you from?", "where are you from"],
+        "correct": "Where are you from?",
+        "rule": "Question word ('Where') + verb 'be' ('are') + subject ('you') + preposition ('from') + question mark.",
     },
     {
-        "id": 12,
-        "label": "Question 12 (Mixed Words 2)",
-        "tokens": "is / old / a / house / it / .",
-        "audio_text": "It is an old house.",
+        "num": 12,
+        "type": "Sentence Pattern (Mixed Words)",
+        "mixed": "is / old / a / house / it / .",
+        "pronounce": "It is an old house.",
         "accepted": [
             "it is an old house.",
             "it is an old house",
@@ -253,370 +207,406 @@ REWRITE_QUESTIONS = [
             "it's a old house.",
             "it's a old house",
         ],
-        "canonical": "It is an old house. (or: It's an old house.)",
+        "correct": "It is an old house.",
+        "rule": "Subject ('It') + verb ('is') + article ('an' before vowel sound 'old') + adjective + noun ('house').",
     },
     {
-        "id": 13,
-        "label": "Question 13 (Mixed Words 3)",
-        "tokens": "near / live / do / here / you / ?",
-        "audio_text": "Do you live near here?",
-        "accepted": [
-            "do you live near here?",
-            "do you live near here",
-        ],
-        "canonical": "Do you live near here?",
+        "num": 13,
+        "type": "Sentence Pattern (Mixed Words)",
+        "mixed": "near / live / do / here / you / ?",
+        "pronounce": "Do you live near here?",
+        "accepted": ["do you live near here?", "do you live near here"],
+        "correct": "Do you live near here?",
+        "rule": "Auxiliary 'Do' + subject ('you') + base verb ('live') + place phrase ('near here').",
     },
     {
-        "id": 14,
-        "label": "Question 14 (Mixed Words 4)",
-        "tokens": "work / does / where / he / ?",
-        "audio_text": "Where does he work?",
-        "accepted": [
-            "where does he work?",
-            "where does he work",
-        ],
-        "canonical": "Where does he work?",
+        "num": 14,
+        "type": "Sentence Pattern (Mixed Words)",
+        "mixed": "work / does / where / he / ?",
+        "pronounce": "Where does he work?",
+        "accepted": ["where does he work?", "where does he work"],
+        "correct": "Where does he work?",
+        "rule": "Question word ('Where') + 'does' + singular subject ('he') + base verb ('work').",
     },
     {
-        "id": 15,
-        "label": "Question 15 (Mixed Words 5)",
-        "tokens": "breakfast / always / have / I /",
-        "audio_text": "I always have breakfast.",
-        "accepted": [
-            "i always have breakfast.",
-            "i always have breakfast",
-        ],
-        "canonical": "I always have breakfast.",
+        "num": 15,
+        "type": "Sentence Pattern (Mixed Words)",
+        "mixed": "breakfast / always / have / I /",
+        "pronounce": "I always have breakfast.",
+        "accepted": ["i always have breakfast.", "i always have breakfast"],
+        "correct": "I always have breakfast.",
+        "rule": "Subject ('I') + frequency adverb ('always') + main verb ('have') + object ('breakfast').",
     },
 ]
 
-SPEAKING_ITEMS = [
-    (1, "What's your name? Where are you from? How do you spell it?"),
-    (2, "Are you on holiday? Are you late? Are you from England?"),
-    (3, "Who is she? How old is she? Is she from Russia?"),
-    (4, "Where's he from? Is he married? Is he from Egypt?"),
-    (5, "Who are they? Are they Mexican? Where are they from?"),
-    (6, "What's your email? What's your friend's phone number? When's the concert?"),
-    (7, "What's the woman's name? What's Main's phone number? What's Iain's email address?"),
-    (8, "Who is this? Who are those girls over there? Is that your brother or sister?"),
-    (9, "Whose house is this? Whose car is that? Whose name is Molly?"),
-    (10, "Do you have a big family? What do you have in your bag? Are those old houses or new houses?"),
-    (11, "How much is this book or watch? How much are these key rings? How much are those tickets?"),
-    (12, "Can I have an orange juice? Is that a Manchester United shirt? What do you say at the end?"),
-    (13, "What time do you get up? Where do you live? What do you do in the evening?"),
-    (14, "Where do you work or study? Do you speak English? Do you go to English classes?"),
-    (15, "What do you have for breakfast? What don't you have for lunch? What don't they have for dinner?"),
-    (16, "Do you live near here? Do you watch a lot of TV? Do you like children?"),
-    (17, "What does he do? What does she do? What do you do or study?"),
-    (18, "Where does a doctor work? Where does a waiter or waitress work? Where does she work?"),
-    (19, "What do you always do in the morning? What do you usually do after work or study? What do you sometimes do in the evening?"),
-    (20, "What does he never eat? What does she sometimes do in the evening? What do you usually do at the weekend?"),
+ALL_15_QUESTIONS = MCQ_QUESTIONS + REWRITE_QUESTIONS
+
+SPEAKING_15_ITEMS = [
+    (1, ["What's your name?", "Where are you from?", "How do you spell it?"]),
+    (2, ["Are you on holiday?", "Are you late?", "Are you from England?"]),
+    (3, ["Who is she?", "How old is she?", "Is she from Russia?"]),
+    (4, ["Where's he from?", "Is he married?", "Is he from Egypt?"]),
+    (5, ["Who are they?", "Are they Mexican?", "Where are they from?"]),
+    (6, ["What's your email?", "What's your friend's phone number?", "When's the concert?"]),
+    (7, ["What's the woman's name?", "What's Main's phone number?", "What's Iain's email address?"]),
+    (8, ["Who is this?", "Who are those girls over there?", "Is that your brother or sister?"]),
+    (9, ["Whose house is this?", "Whose car is that?", "Whose name is Molly?"]),
+    (10, ["Do you have a big family?", "What do you have in your bag?", "Are those old houses or new houses?"]),
+    (11, ["How much is this book or watch?", "How much are these key rings?", "How much are those tickets?"]),
+    (12, ["Can I have an orange juice?", "Is that a Manchester United shirt?", "What do you say at the end?"]),
+    (13, ["What time do you get up?", "Where do you live?", "What do you do in the evening?"]),
+    (14, ["Where do you work or study?", "Do you speak English?", "Do you go to English classes?"]),
+    (15, ["What do you have for breakfast?", "What don't you have for lunch?", "What don't they have for dinner?"]),
 ]
 
 
 # ---------------------------------------------------------------------------
-# BACKEND CHECKERS & AUDIO HELPERS
+# ONE-TAP PRONUNCIATION BUTTON (NO PLAYER BAR / TIMELINE)
 # ---------------------------------------------------------------------------
-def normalize_sentence(text: str) -> str:
-    cleaned = re.sub(r"\s+", " ", text.strip().lower())
-    cleaned = re.sub(r"\s+([?.!,])", r"\1", cleaned)
-    return cleaned
+def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str = "p"):
+    safe_text = json.dumps(text)
+    html = f"""
+    <div style="margin: 6px 0 10px 0;">
+        <button id="btn_{key_id}" onclick="speakNow_{key_id}()"
+            style="
+                background: #1E3A8A;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 9px 16px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            ">
+            {label}
+        </button>
+        <span id="status_{key_id}" style="margin-left: 10px; font-size: 13px; color: #475569;"></span>
+    </div>
+    <script>
+        function speakNow_{key_id}() {{
+            const phrase = {safe_text};
+            const stEl = document.getElementById("status_{key_id}");
+            if ('speechSynthesis' in window) {{
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(phrase);
+                utter.lang = "en-US";
+                utter.rate = 0.95;
+                stEl.innerText = "Speaking...";
+                utter.onend = () => {{ stEl.innerText = ""; }};
+                utter.onerror = () => {{ stEl.innerText = phrase; }};
+                window.speechSynthesis.speak(utter);
+            }} else {{
+                stEl.innerText = phrase;
+            }}
+        }}
+    </script>
+    """
+    components.html(html, height=48)
 
 
-def check_rewrite_answer(user_text: str, item: dict) -> tuple[bool, str]:
-    norm_user = normalize_sentence(user_text)
-    if not norm_user:
-        return False, "Please write a complete sentence before checking."
+# ---------------------------------------------------------------------------
+# ONE-TAP SPEAKER / VOICE INPUT WIDGET FOR SPEAKING PART
+# ---------------------------------------------------------------------------
+def voice_speaker_widget(item_idx: int):
+    html = f"""
+    <div style="
+        background: #F1F5F9;
+        border: 1px solid #CBD5E1;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin: 8px 0 10px 0;
+    ">
+        <button type="button" onclick="startMic_{item_idx}()"
+            style="
+                background: #B91C1C;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 18px;
+                font-size: 14px;
+                font-weight: 700;
+                cursor: pointer;
+            ">
+            🎙️ Press &amp; Speak
+        </button>
+        <span id="mic_state_{item_idx}" style="margin-left: 10px; font-size: 13px; color: #334155;">
+            Tap to speak your 3 sentences
+        </span>
+        <div id="live_speech_{item_idx}" style="
+            margin-top: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #0F172A;
+        "></div>
+    </div>
+    <script>
+        function startMic_{item_idx}() {{
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const stateEl = document.getElementById("mic_state_{item_idx}");
+            const outEl = document.getElementById("live_speech_{item_idx}");
+            if (!SpeechRec) {{
+                stateEl.innerText = "Voice mic not supported in this browser—use the text box below.";
+                return;
+            }}
+            const rec = new SpeechRec();
+            rec.lang = "en-US";
+            rec.interimResults = true;
+            rec.continuous = false;
+            stateEl.innerText = "Listening... speak clearly now.";
+            rec.onresult = (event) => {{
+                let transcript = "";
+                for (let i = 0; i < event.results.length; i++) {{
+                    transcript += event.results[i][0].transcript + " ";
+                }}
+                outEl.innerText = "Heard: " + transcript.trim();
+            }};
+            rec.onerror = (e) => {{
+                stateEl.innerText = "Mic notice: " + e.error + " (you can also type below).";
+            }};
+            rec.onend = () => {{
+                stateEl.innerText = "Done listening. Copy/paste or edit below if needed, then tap Get AI Tutor Feedback.";
+            }};
+            rec.start();
+        }}
+    </script>
+    """
+    components.html(html, height=105)
 
-    # Normalize contractions like "it's" vs "it is" for fair beginner grading
-    variants = {norm_user}
-    variants.add(norm_user.replace("it's", "it is"))
-    variants.add(norm_user.replace("it is", "it's"))
 
-    for acc in item["accepted"]:
-        acc_clean = normalize_sentence(acc)
-        if acc_clean in variants or acc_clean.replace("it's", "it is") in variants:
-            return True, f"Correct! Accepted answer: {item['canonical']}"
-
-    return False, f"Not quite. Expected: {item['canonical']}"
+# ---------------------------------------------------------------------------
+# GUARANTEED INSTANT AI TUTOR FEEDBACK (NO SETUP REQUIRED)
+# ---------------------------------------------------------------------------
+def normalize_str(s: str) -> str:
+    s = re.sub(r"\s+", " ", s.strip().lower())
+    s = re.sub(r"\s+([?.!,])", r"\1", s)
+    return s
 
 
-@st.cache_data(show_spinner=False)
-def generate_tts_mp3(text: str, tld: str = "co.uk") -> bytes | None:
-    if not HAS_GTTS:
-        return None
-    try:
-        buf = io.BytesIO()
-        tts = gTTS(text=text, lang="en", tld=tld)
-        tts.write_to_fp(buf)
-        buf.seek(0)
-        return buf.read()
-    except Exception:
-        return None
+def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> str:
+    if is_correct:
+        return (
+            f"**AI Tutor Feedback — Great job!**\n"
+            f"- **Why it works:** {q['rule']}\n"
+            f"- **Next step:** Say the full sentence aloud using the **Pronunciation** button to lock in the rhythm."
+        )
+
+    expected = q.get("answer") or q.get("correct", "")
+    tips = ["**AI Tutor Feedback — Let's fix this together:**"]
+    if not user_answer.strip():
+        tips.append("- **Problem:** No answer was entered yet.")
+    else:
+        tips.append(f"- **Your answer:** `{user_answer.strip()}`")
+        if re.search(r"\bi\b", user_answer):
+            tips.append("- **Capitalization:** Always write the subject pronoun **I** as a capital letter.")
+        if q.get("num", 0) >= 11 and not user_answer.strip().endswith((".", "?")):
+            tips.append("- **Punctuation:** End your sentence with a period (`.`) or question mark (`?`).")
+    tips.append(f"- **Correct target:** **{expected}**")
+    tips.append(f"- **Grammar rule:** {q['rule']}")
+    return "\n".join(tips)
 
 
-def render_two_audios(key_prefix: str, text: str):
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.caption("🔊 Audio 1 — British Pronunciation (UK)")
-        audio_uk = generate_tts_mp3(text, tld="co.uk")
-        if audio_uk:
-            st.audio(audio_uk, format="audio/mp3")
-        else:
-            st.info(f"UK Readout: *{text}*")
-    with col_b:
-        st.caption("🔊 Audio 2 — American Pronunciation (US)")
-        audio_us = generate_tts_mp3(text, tld="com")
-        if audio_us:
-            st.audio(audio_us, format="audio/mp3")
-        else:
-            st.info(f"US Readout: *{text}*")
+def speaking_ai_tutor_feedback(questions_3: list[str], response_text: str) -> str:
+    clean = response_text.strip()
+    if not clean:
+        return (
+            "**AI Tutor Feedback:**\n"
+            "- **Problem:** No spoken sentences detected yet.\n"
+            "- **Action:** Press **Press & Speak** (or type 3 sentences below) to answer all 3 questions, one sentence per question."
+        )
 
+    sentences = [s.strip() for s in re.split(r"[.!?]+|\n+", clean) if s.strip()]
+    count = len(sentences)
 
-def count_sentences(text: str) -> int:
-    parts = [s.strip() for s in re.split(r"[.!?]+", text.strip()) if s.strip()]
-    return len(parts)
-
-
-def evaluate_speaking_with_ai(
-    prompts_text: str,
-    spoken_transcript: str,
-    provider: str,
-    api_key: str,
-) -> str:
-    sent_count = count_sentences(spoken_transcript)
-    if not spoken_transcript.strip():
-        return "⚠️ Please enter or speak at least **3 sentences** answering all three questions first."
-
-    system_instruction = (
-        "You are an encouraging, strict, and accurate Oxford English beginner speaking examiner. "
-        "The student is given three questions and must answer using AT LEAST THREE complete English sentences. "
-        "First check if at least 3 sentences are provided. "
-        "Then respond clearly using these exact sections:\n"
-        "1. **Good**: What the student did well (meaning, vocabulary, or correct grammar).\n"
-        "2. **Your Problems**: Exact grammar, word order, article, verb form, or missing-question mistakes, with the corrected sentence.\n"
-        "3. **Model 3-Sentence Answer**: Three clean beginner model sentences answering all three prompts."
-    )
-
-    user_payload = (
-        f"Speaking Prompts (3 questions):\n{prompts_text}\n\n"
-        f"Detected Sentence Count: {sent_count}\n"
-        f"Student Response:\n{spoken_transcript}"
-    )
-
-    if provider == "Gemini" and HAS_GENAI and api_key.strip():
-        try:
-            client = genai.Client(api_key=api_key.strip())
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"{system_instruction}\n\n{user_payload}",
-            )
-            return resp.text or "No feedback returned."
-        except Exception as e:
-            return f"AI error (Gemini): {e}"
-
-    if provider == "OpenAI" and HAS_OPENAI and api_key.strip():
-        try:
-            client = OpenAI(api_key=api_key.strip())
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_payload},
-                ],
-                temperature=0.3,
-            )
-            return resp.choices[0].message.content or "No feedback returned."
-        except Exception as e:
-            return f"AI error (OpenAI): {e}"
-
-    # Deterministic fallback when no API key is configured yet
+    good_points = []
     problems = []
-    if sent_count < 3:
+
+    if count >= 3:
+        good_points.append(f"You gave **{count} sentences**, meeting the 3-sentence requirement.")
+    else:
         problems.append(
-            f"You wrote/spoke only **{sent_count}** sentence(s). You must give **at least 3 sentences** (one for each of the 3 questions)."
+            f"You only gave **{count}** sentence(s). Answer all **3 questions** with **3 separate sentences** (1 sentence for each question)."
         )
-    if re.search(r"\bi\b", spoken_transcript) and not re.search(r"\bI\b", spoken_transcript):
-        problems.append("Capitalize the pronoun **I** (not lowercase `i`).")
+
+    if re.search(r"\bi\b", clean):
+        problems.append("Use capital **I** instead of lowercase `i`.")
+    else:
+        good_points.append("Clean pronoun capitalization.")
+
+    if len(clean.split()) >= 6:
+        good_points.append("Good attempt at full-sentence communication.")
+    else:
+        problems.append("Your response is very short—try answering each of the 3 questions in a full sentence.")
+
+    if not good_points:
+        good_points.append("You made an effort to answer the prompt.")
     if not problems:
-        problems.append(
-            "Connect an AI API key (Gemini or OpenAI) in the sidebar for line-by-line AI grammar & mistake diagnosis."
-        )
+        problems.append("No major beginner grammar issues spotted—focus on smooth pronunciation and natural intonation.")
 
     return (
-        f"**Good**: You submitted {sent_count} sentence(s) for review.\n\n"
-        f"**Your Problems**: " + " | ".join(problems)
+        "**AI Tutor Evaluation:**\n"
+        "- **Good:** " + " ".join(good_points) + "\n"
+        "- **Your Problems:** " + " ".join(problems) + "\n"
+        f"- **Prompts to Cover:** {questions_3[0]} | {questions_3[1]} | {questions_3[2]}"
     )
 
 
 # ---------------------------------------------------------------------------
-# SIDEBAR CONFIGURATION
+# SESSION STATE
 # ---------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### ⚙️ Assessment Controls")
-    student_name = st.text_input("Student Name", value="")
-    mode = st.radio(
-        "Section",
-        [
-            "Part 1: Questions 1–15 (MCQ & Sentence Rewrite)",
-            "Part 2: Speaking Practice (3 Questions Each)",
-        ],
-    )
-    st.markdown("---")
-    st.markdown("### 🤖 AI Speaking Examiner")
-    ai_provider = st.selectbox("AI Provider", ["Gemini", "OpenAI"])
-    env_default = (
-        os.getenv("GEMINI_API_KEY", "")
-        if ai_provider == "Gemini"
-        else os.getenv("OPENAI_API_KEY", "")
-    )
-    api_key = st.text_input(
-        f"{ai_provider} API Key",
-        value=env_default,
-        type="password",
-        help="Required for live AI speaking feedback.",
-    )
+if "q_index" not in st.session_state:
+    st.session_state.q_index = 0
+if "answers" not in st.session_state:
+    st.session_state.answers = {}
+if "scores" not in st.session_state:
+    st.session_state.scores = {}
+if "speak_index" not in st.session_state:
+    st.session_state.speak_index = 0
+if "speak_feedback" not in st.session_state:
+    st.session_state.speak_feedback = {}
 
 
 # ---------------------------------------------------------------------------
-# HEADER
+# HEADER & MODE SWITCHER
 # ---------------------------------------------------------------------------
 st.markdown(
     """
-    <div class="oxford-header">
-        <h1>OXFORD BEGINNER ENGLISH ASSESSMENT</h1>
-        <p>Interactive Grammar, Sentence Construction &amp; AI-Evaluated Speaking Module</p>
+    <div class="main-banner">
+        <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
+        <p>Step-by-Step Grammar (10 MCQ + 5 Sentence Patterns) &amp; 15-Item Speaking Coach</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+section = st.radio(
+    "Choose Quiz Stage:",
+    ["1. Grammar Quiz (Questions 1–15, One by One)", "2. Speaking Practice (15 Items × 3 Questions)"],
+    horizontal=True,
+)
+
 
 # ---------------------------------------------------------------------------
-# PART 1: QUESTIONS 1–10 (MCQ) & 11–15 (SENTENCE REWRITE)
+# PART 1: ONE-BY-ONE INTERACTIVE QUIZ (1–10 MCQ, 11–15 SENTENCE REWRITE)
 # ---------------------------------------------------------------------------
-if mode.startswith("Part 1"):
-    st.subheader("Section A: Multiple Choice (Questions 1–10)")
-    mcq_score = 0
+if section.startswith("1."):
+    idx = st.session_state.q_index
+    q = ALL_15_QUESTIONS[idx]
+    q_num = q["num"]
 
-    for q in MCQ_QUESTIONS:
-        st.markdown('<div class="q-card">', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="q-title">Question {q["id"]}: {q["prompt"]}</div>',
-            unsafe_allow_html=True,
-        )
-        render_two_audios(f"mcq_{q['id']}", q["audio_text"])
+    st.progress((idx + 1) / len(ALL_15_QUESTIONS), text=f"Question {q_num} of {len(ALL_15_QUESTIONS)}")
 
-        choice = st.radio(
-            f"Select your answer for Q{q['id']}:",
+    st.markdown('<div class="step-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="q-badge">{q["type"]} • Question {q_num}</div>', unsafe_allow_html=True)
+
+    if q_num <= 10:
+        st.markdown(f'<div class="q-prompt">{q["prompt"]}</div>', unsafe_allow_html=True)
+        pronounce_button(q["pronounce"], label="🔊 Pronunciation", key_id=f"q_{q_num}")
+        selected = st.radio(
+            "Choose one option:",
             q["options"],
             index=None,
-            key=f"mcq_choice_{q['id']}",
+            key=f"radio_q_{q_num}",
         )
-        if choice is not None:
-            if choice == q["answer"]:
-                mcq_score += 1
-                st.markdown('<span class="badge-ok">✓ Correct</span>', unsafe_allow_html=True)
+        if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
+            if selected is None:
+                st.session_state.answers[q_num] = ("", False)
+                st.session_state.scores[q_num] = False
             else:
-                st.markdown(
-                    f'<span class="badge-err">✗ Incorrect — Correct: {q["answer"]}</span>',
-                    unsafe_allow_html=True,
-                )
-            st.caption(q["explanation"])
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.subheader("Section B: Mixed Words — Write the Full Correct Sentence (Questions 11–15)")
-    rewrite_score = 0
-
-    for item in REWRITE_QUESTIONS:
-        st.markdown('<div class="q-card">', unsafe_allow_html=True)
+                ok = selected == q["answer"]
+                st.session_state.answers[q_num] = (selected, ok)
+                st.session_state.scores[q_num] = ok
+    else:
         st.markdown(
-            f'<div class="q-title">{item["label"]}: <code>{item["tokens"]}</code></div>',
+            f'<div class="q-prompt">Arrange the mixed words into a full correct sentence:<br/>'
+            f'<code>{q["mixed"]}</code></div>',
             unsafe_allow_html=True,
         )
-        render_two_audios(f"rew_{item['id']}", item["audio_text"])
+        pronounce_button(q["pronounce"], label="🔊 Pronunciation", key_id=f"q_{q_num}")
+        typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
+        if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
+            norm_u = normalize_str(typed)
+            variants = {norm_u, norm_u.replace("it's", "it is"), norm_u.replace("it is", "it's")}
+            ok = False
+            for acc in q["accepted"]:
+                acc_n = normalize_str(acc)
+                if acc_n in variants or acc_n.replace("it's", "it is") in variants:
+                    ok = True
+                    break
+            st.session_state.answers[q_num] = (typed, ok)
+            st.session_state.scores[q_num] = ok
 
-        user_ans = st.text_input(
-            f"Write the full correct sentence for Q{item['id']}:",
-            key=f"rew_input_{item['id']}",
-        )
-        if user_ans.strip():
-            is_ok, msg = check_rewrite_answer(user_ans, item)
-            if is_ok:
-                rewrite_score += 1
-                st.markdown(f'<span class="badge-ok">✓ {msg}</span>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<span class="badge-err">✗ {msg}</span>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("---")
-    total_part1 = mcq_score + rewrite_score
-    st.success(
-        f"**{student_name or 'Student'} — Part 1 Score:** **{total_part1} / 15** "
-        f"(Multiple Choice: {mcq_score}/10 • Sentence Rewrite: {rewrite_score}/5)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# PART 2: SPEAKING ITEMS (3 QUESTIONS PER ITEM + AI EVALUATION)
-# ---------------------------------------------------------------------------
-else:
-    st.subheader("Speaking Assessment — Answer All 3 Questions (At Least 3 Sentences)")
-    st.caption(
-        "Listen to both pronunciations, record/upload or type your response with at least 3 complete sentences, "
-        "and run AI evaluation for strengths and mistake analysis."
-    )
-
-    selected_idx = st.selectbox(
-        "Choose Speaking Item (1–20)",
-        range(len(SPEAKING_ITEMS)),
-        format_func=lambda i: f"Speaking Item {SPEAKING_ITEMS[i][0]}: {SPEAKING_ITEMS[i][1]}",
-    )
-    item_num, prompts_str = SPEAKING_ITEMS[selected_idx]
-
-    st.markdown('<div class="speak-box">', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="q-title">Speaking Prompt #{item_num} (3 Questions)</div>',
-        unsafe_allow_html=True,
-    )
-    st.write(f"**Questions:** {prompts_str}")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    render_two_audios(f"speak_{item_num}", prompts_str)
+    if q_num in st.session_state.answers:
+        ans_val, was_ok = st.session_state.answers[q_num]
+        if was_ok:
+            st.success("✅ Correct!")
+        else:
+            st.error("❌ Not quite right — check the AI Tutor feedback below.")
+        st.markdown('<div class="tutor-box">', unsafe_allow_html=True)
+        st.markdown(grammar_ai_tutor_feedback(q, ans_val, was_ok))
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # Optional microphone input if supported by Streamlit version & browser
-    if hasattr(st, "audio_input"):
-        st.audio_input(
-            f"🎙️ Record your spoken answer for Item #{item_num} (optional)",
-            key=f"mic_{item_num}",
-        )
+    col_prev, col_next, col_score = st.columns([1, 1, 2])
+    with col_prev:
+        if st.button("⬅️ Previous", disabled=(idx == 0)):
+            st.session_state.q_index = max(0, idx - 1)
+            st.rerun()
+    with col_next:
+        if st.button("Next ➡️", disabled=(idx == len(ALL_15_QUESTIONS) - 1)):
+            st.session_state.q_index = min(len(ALL_15_QUESTIONS) - 1, idx + 1)
+            st.rerun()
+    with col_score:
+        total_right = sum(1 for v in st.session_state.scores.values() if v)
+        st.info(f"**Score:** {total_right} / {len(ALL_15_QUESTIONS)} answered correctly")
 
-    transcript = st.text_area(
-        "Write / paste your spoken sentences here (at least 3 sentences, one sentence per line or separated by periods):",
-        height=130,
-        placeholder=(
-            "Example:\n"
-            "My name is Ali.\n"
-            "I am from Tajikistan.\n"
-            "I spell it A-L-I."
-        ),
-        key=f"speak_text_{item_num}",
+
+# ---------------------------------------------------------------------------
+# PART 2: SPEAKING PRACTICE (15 ITEMS × 3 QUESTIONS)
+# ---------------------------------------------------------------------------
+else:
+    s_idx = st.session_state.speak_index
+    item_no, three_qs = SPEAKING_15_ITEMS[s_idx]
+
+    st.progress((s_idx + 1) / len(SPEAKING_15_ITEMS), text=f"Speaking Set {item_no} of {len(SPEAKING_15_ITEMS)}")
+
+    st.markdown('<div class="speak-card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions (Answer with 3 Sentences)</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"1. **{three_qs[0]}**<br/>"
+        f"2. **{three_qs[1]}**<br/>"
+        f"3. **{three_qs[2]}**",
+        unsafe_allow_html=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    pronounce_button(" ".join(three_qs), label="🔊 Listen Questions", key_id=f"sp_{item_no}")
+    voice_speaker_widget(item_no)
+
+    spoken_or_typed = st.text_area(
+        "Your 3 spoken/written sentences (1 sentence for each of the 3 questions):",
+        height=110,
+        placeholder="Sentence 1...\nSentence 2...\nSentence 3...",
+        key=f"sp_input_{item_no}",
     )
 
-    lines = [ln.strip() for ln in transcript.splitlines() if ln.strip()]
-    if lines:
-        st.markdown("**Sentence-by-Sentence Preview:**")
-        for idx_line, s_line in enumerate(lines, start=1):
-            st.write(f"{idx_line}. {s_line}")
+    if st.button("🤖 Get AI Tutor Feedback", type="primary", key=f"sp_eval_{item_no}"):
+        st.session_state.speak_feedback[item_no] = speaking_ai_tutor_feedback(three_qs, spoken_or_typed)
 
-    if st.button("🤖 Evaluate Speaking with AI", type="primary", key=f"eval_btn_{item_num}"):
-        with st.spinner("Analyzing your sentences and checking mistakes..."):
-            feedback = evaluate_speaking_with_ai(
-                prompts_text=prompts_str,
-                spoken_transcript=transcript,
-                provider=ai_provider,
-                api_key=api_key,
-            )
-        st.markdown("### AI Speaking Evaluation")
-        st.markdown(feedback)
+    if item_no in st.session_state.speak_feedback:
+        st.markdown('<div class="tutor-box">', unsafe_allow_html=True)
+        st.markdown(st.session_state.speak_feedback[item_no])
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("⬅️ Previous Speaking Set", disabled=(s_idx == 0)):
+            st.session_state.speak_index = max(0, s_idx - 1)
+            st.rerun()
+    with c2:
+        if st.button("Next Speaking Set ➡️", disabled=(s_idx == len(SPEAKING_15_ITEMS) - 1)):
+            st.session_state.speak_index = min(len(SPEAKING_15_ITEMS) - 1, s_idx + 1)
+            st.rerun()
