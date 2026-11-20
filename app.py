@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import urllib.parse
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -290,150 +289,149 @@ def listen_button(text: str, key_id: str):
     )
 
 
-@st.cache_resource
-def _get_mic_component():
-    html_code = """<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:transparent;">
-<div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <button type="button" id="mic_btn" onclick="toggleMic()"
-            style="background:#DC2626;color:#FFFFFF;border:none;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">
-            🎙️ Mic
-        </button>
-        <span id="mic_status" style="color:#F8FAFC;font-size:13px;font-weight:600;">Ready to record</span>
-        <span id="mic_timer" style="color:#FBBF24;font-size:13px;font-weight:700;">00:00</span>
-    </div>
-    <audio id="mic_player" controls style="width:100%;margin-top:12px;display:none;"></audio>
-</div>
-<script>
-let recorder = null;
-let stream = null;
-let chunks = [];
-let timerInterval = null;
-let seconds = 0;
+def mic_recorder(key_id: str, item_no: int):
+    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    components.html(
+        f"""
+        <div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="mic_btn_{safe_id}" onclick="toggleMic_{safe_id}()"
+                    style="background:#DC2626;color:#FFFFFF;border:none;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">
+                    🎙️ Mic
+                </button>
+                <span id="mic_status_{safe_id}" style="color:#F8FAFC;font-size:13px;font-weight:600;">Ready to record</span>
+                <span id="mic_timer_{safe_id}" style="color:#FBBF24;font-size:13px;font-weight:700;">00:00</span>
+            </div>
+            <audio id="mic_player_{safe_id}" controls style="width:100%;margin-top:12px;display:none;"></audio>
+        </div>
+        <script>
+        let recorder_{safe_id} = null;
+        let stream_{safe_id} = null;
+        let chunks_{safe_id} = [];
+        let timerInterval_{safe_id} = null;
+        let seconds_{safe_id} = 0;
 
-function sendValueToStreamlit(val) {
-    window.parent.postMessage({
-        isStreamlitMessage: true,
-        type: "streamlit:setComponentValue",
-        value: val,
-        dataType: "json"
-    }, "*");
-}
+        function formatTime_{safe_id}(sec) {{
+            const m = String(Math.floor(sec / 60)).padStart(2, "0");
+            const s = String(sec % 60).padStart(2, "0");
+            return m + ":" + s;
+        }}
 
-function sendReadyToStreamlit() {
-    window.parent.postMessage({
-        isStreamlitMessage: true,
-        type: "streamlit:componentReady",
-        apiVersion: 1
-    }, "*");
-}
-
-function setFrameHeight(h) {
-    window.parent.postMessage({
-        isStreamlitMessage: true,
-        type: "streamlit:setFrameHeight",
-        height: h
-    }, "*");
-}
-
-function formatTime(sec) {
-    const m = String(Math.floor(sec / 60)).padStart(2, "0");
-    const s = String(sec % 60).padStart(2, "0");
-    return m + ":" + s;
-}
-
-window.addEventListener("message", (event) => {
-    const data = event.data;
-    if (data && data.type === "streamlit:render") {
-        setFrameHeight(document.body.scrollHeight + 8);
-    }
-});
-
-async function toggleMic() {
-    const btn = document.getElementById("mic_btn");
-    const statusEl = document.getElementById("mic_status");
-    const timerEl = document.getElementById("mic_timer");
-    const player = document.getElementById("mic_player");
-
-    if (recorder && recorder.state === "recording") {
-        recorder.stop();
-        clearInterval(timerInterval);
-        btn.textContent = "🎙️ Mic";
-        btn.style.background = "#DC2626";
-        statusEl.textContent = "Recorded";
-        return;
-    }
-
-    try {
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-        }
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        chunks = [];
-        recorder = new MediaRecorder(stream);
-
-        recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-                chunks.push(e.data);
-            }
-        };
-
-        recorder.onstop = () => {
-            const mimeType = recorder.mimeType || "audio/webm";
-            const blob = new Blob(chunks, { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            player.src = url;
-            player.style.display = "block";
-            setFrameHeight(document.body.scrollHeight + 12);
-            if (stream) {
-                stream.getTracks().forEach(t => t.stop());
-            }
-
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const dataUrl = reader.result || "";
-                const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : "";
-                sendValueToStreamlit({
+        function saveAudioToParent_{safe_id}(base64Data, mimeType) {{
+            try {{
+                if (!window.top.__spAudioStore) window.top.__spAudioStore = {{}};
+                window.top.__spAudioStore[{item_no}] = {{
                     base64: base64Data,
                     mime: mimeType,
                     name: "recording.webm"
-                });
-            };
-            reader.readAsDataURL(blob);
-        };
+                }};
+            }} catch (e) {{}}
+        }}
 
-        recorder.start();
-        seconds = 0;
-        timerEl.textContent = "00:00";
-        clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
-            seconds += 1;
-            timerEl.textContent = formatTime(seconds);
-        }, 1000);
+        async function toggleMic_{safe_id}() {{
+            const btn = document.getElementById("mic_btn_{safe_id}");
+            const statusEl = document.getElementById("mic_status_{safe_id}");
+            const timerEl = document.getElementById("mic_timer_{safe_id}");
+            const player = document.getElementById("mic_player_{safe_id}");
 
-        btn.textContent = "⏹ Stop";
-        btn.style.background = "#059669";
-        statusEl.textContent = "Recording...";
-    } catch (err) {
-        statusEl.textContent = "Mic error: " + (err && err.message ? err.message : "Allow microphone permission");
-    }
-}
+            if (recorder_{safe_id} && recorder_{safe_id}.state === "recording") {{
+                recorder_{safe_id}.stop();
+                clearInterval(timerInterval_{safe_id});
+                btn.textContent = "🎙️ Mic";
+                btn.style.background = "#DC2626";
+                statusEl.textContent = "Recorded";
+                return;
+            }}
 
-sendReadyToStreamlit();
-setFrameHeight(140);
-</script>
-</body>
-</html>"""
-    data_url = "data:text/html;charset=utf-8," + urllib.parse.quote(html_code)
-    return components.declare_component("mic_recorder_comp", url=data_url)
+            try {{
+                if (stream_{safe_id}) {{
+                    stream_{safe_id}.getTracks().forEach(t => t.stop());
+                }}
+                stream_{safe_id} = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                chunks_{safe_id} = [];
+                recorder_{safe_id} = new MediaRecorder(stream_{safe_id});
+
+                recorder_{safe_id}.ondataavailable = (e) => {{
+                    if (e.data && e.data.size > 0) {{
+                        chunks_{safe_id}.push(e.data);
+                    }}
+                }};
+
+                recorder_{safe_id}.onstop = () => {{
+                    const mimeType = recorder_{safe_id}.mimeType || "audio/webm";
+                    const blob = new Blob(chunks_{safe_id}, {{ type: mimeType }});
+                    const url = URL.createObjectURL(blob);
+                    player.src = url;
+                    player.style.display = "block";
+                    if (stream_{safe_id}) {{
+                        stream_{safe_id}.getTracks().forEach(t => t.stop());
+                    }}
+                    const reader = new FileReader();
+                    reader.onloadend = () => {{
+                        const dataUrl = reader.result || "";
+                        const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : "";
+                        saveAudioToParent_{safe_id}(base64Data, mimeType);
+                    }};
+                    reader.readAsDataURL(blob);
+                }};
+
+                recorder_{safe_id}.start();
+                seconds_{safe_id} = 0;
+                timerEl.textContent = "00:00";
+                clearInterval(timerInterval_{safe_id});
+                timerInterval_{safe_id} = setInterval(() => {{
+                    seconds_{safe_id} += 1;
+                    timerEl.textContent = formatTime_{safe_id}(seconds_{safe_id});
+                }}, 1000);
+
+                btn.textContent = "⏹ Stop";
+                btn.style.background = "#059669";
+                statusEl.textContent = "Recording...";
+            }} catch (err) {{
+                statusEl.textContent = "Mic error: " + (err && err.message ? err.message : "Allow microphone permission");
+            }}
+        }}
+        </script>
+        """,
+        height=135,
+    )
 
 
-def mic_recorder(key_id: str):
-    comp = _get_mic_component()
-    return comp(key=key_id, default=None)
+def submit_bridge_button(item_no: int, key_id: str):
+    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    components.html(
+        f"""
+        <div style="font-family:sans-serif;margin-top:4px;">
+            <button type="button" id="sub_btn_{safe_id}" onclick="doSubmit_{safe_id}()"
+                style="background:#E11D48;color:#FFFFFF;border:none;padding:9px 20px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
+                Submit
+            </button>
+            <span id="sub_msg_{safe_id}" style="margin-left:10px;color:#FBBF24;font-size:13px;font-weight:600;"></span>
+        </div>
+        <script>
+        function doSubmit_{safe_id}() {{
+            const msgEl = document.getElementById("sub_msg_{safe_id}");
+            let rec = null;
+            try {{
+                if (window.top && window.top.__spAudioStore) {{
+                    rec = window.top.__spAudioStore[{item_no}] || null;
+                }}
+            }} catch (e) {{}}
+            if (!rec || !rec.base64) {{
+                msgEl.textContent = "Please record your voice with Mic first.";
+                return;
+            }}
+            msgEl.textContent = "Sending to AI...";
+            const payloadStr = JSON.stringify({{ item: {item_no}, base64: rec.base64, mime: rec.mime, name: rec.name }});
+            const b64Payload = btoa(unescape(encodeURIComponent(payloadStr)));
+            const url = new URL(window.top.location.href);
+            url.searchParams.set("sp_sub", b64Payload);
+            window.top.location.assign(url.toString());
+        }}
+        </script>
+        """,
+        height=48,
+    )
 
 
 def ai_check_speaking(questions: list[str], audio_bytes: bytes, mime_type: str, filename: str, api_key: str) -> dict:
@@ -551,10 +549,36 @@ if "sp_index" not in st.session_state:
     st.session_state.sp_index = 0
 if "sp_results" not in st.session_state:
     st.session_state.sp_results = {}
-if "sp_recordings" not in st.session_state:
-    st.session_state.sp_recordings = {}
 
 api_key = get_api_key()
+
+sp_sub_param = st.query_params.get("sp_sub")
+if sp_sub_param:
+    try:
+        decoded_json = base64.b64decode(sp_sub_param).decode("utf-8")
+        sub_obj = json.loads(decoded_json)
+        sub_item = int(sub_obj.get("item", 0))
+        sub_b64 = sub_obj.get("base64", "")
+        sub_mime = sub_obj.get("mime") or "audio/webm"
+        sub_name = sub_obj.get("name") or "recording.webm"
+        q_lookup = dict(SPEAKING_15_ITEMS).get(sub_item, [])
+        if sub_item and sub_b64:
+            raw_bytes = base64.b64decode(sub_b64)
+            with st.spinner("AI is checking your voice..."):
+                st.session_state.sp_results[sub_item] = ai_check_speaking(
+                    q_lookup,
+                    raw_bytes,
+                    sub_mime,
+                    sub_name,
+                    api_key,
+                )
+    except Exception:
+        pass
+    finally:
+        try:
+            del st.query_params["sp_sub"]
+        except Exception:
+            pass
 
 st.markdown(
     """
@@ -638,33 +662,8 @@ else:
         st.markdown(f"**{i}. {sq}**")
 
     listen_button(three_qs, key_id=f"spk_set_{item_no}")
-    mic_val = mic_recorder(key_id=f"mic_set_{item_no}")
-
-    if isinstance(mic_val, dict) and mic_val.get("base64"):
-        st.session_state.sp_recordings[item_no] = mic_val
-
-    if st.button("Submit", type="primary", key=f"submit_voice_{item_no}"):
-        rec = st.session_state.sp_recordings.get(item_no)
-        if not rec or not rec.get("base64"):
-            st.session_state.sp_results[item_no] = {
-                "passed": False,
-                "transcript": "(no voice recorded yet)",
-                "correct": [],
-                "mistakes": ["Please record your voice with Mic first, then tap Submit."],
-                "better": [],
-            }
-        else:
-            raw_bytes = base64.b64decode(rec["base64"])
-            mime = rec.get("mime") or "audio/webm"
-            fname = rec.get("name") or "recording.webm"
-            with st.spinner("AI is checking your voice..."):
-                st.session_state.sp_results[item_no] = ai_check_speaking(
-                    three_qs,
-                    raw_bytes,
-                    mime,
-                    fname,
-                    api_key,
-                )
+    mic_recorder(key_id=f"mic_set_{item_no}", item_no=item_no)
+    submit_bridge_button(item_no=item_no, key_id=f"submit_set_{item_no}")
 
     res = st.session_state.sp_results.get(item_no)
     if res:
