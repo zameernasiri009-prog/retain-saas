@@ -1,8 +1,5 @@
-import base64
 import html
-import io
 import json
-import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -241,19 +238,6 @@ def render_html_box(html_str: str, height: int | str = "content", alt: str = "Em
         components.html(html_str, height=fixed_h)
 
 
-def get_api_key() -> str:
-    for key_name in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
-        try:
-            if key_name in st.secrets and st.secrets[key_name]:
-                return str(st.secrets[key_name]).strip()
-        except Exception:
-            pass
-        env_val = os.environ.get(key_name, "").strip()
-        if env_val:
-            return env_val
-    return ""
-
-
 def listen_button(text: str, key_id: str):
     lines = text if isinstance(text, list) else [text]
     payload = json.dumps(lines)
@@ -307,6 +291,9 @@ def mic_recorder(key_id: str, item_no: int):
     render_html_box(
         f"""
         <div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
+            <div style="margin-bottom:10px;color:#F8FAFC;font-size:14px;font-weight:600;">
+                Record your voice speaking, answering the questions.
+            </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <button type="button" id="mic_btn_{safe_id}" onclick="toggleMic_{safe_id}()"
                     style="background:#DC2626;color:#FFFFFF;border:none;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">
@@ -338,7 +325,7 @@ def mic_recorder(key_id: str, item_no: int):
                 window.top.__spAudioStore[{item_no}] = {{
                     base64: base64Data,
                     mime: mimeType,
-                    name: "recording.webm",
+                    name: "set_{item_no}_recording.webm",
                     transcript: transcriptText || "",
                     recorded: true
                 }};
@@ -472,7 +459,7 @@ def submit_bridge_button(item_no: int, key_id: str):
             }} catch (e) {{}}
             const tx = rec && rec.transcript ? String(rec.transcript).slice(0, 250) : "";
             const hasRec = rec && (rec.recorded || rec.base64) ? "1" : "0";
-            statusEl.textContent = "Reviewing...";
+            statusEl.textContent = "Checking grammar...";
             try {{
                 const targetWin = window.top || window;
                 const url = new URL(targetWin.location.href);
@@ -492,23 +479,136 @@ def submit_bridge_button(item_no: int, key_id: str):
     )
 
 
-def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool) -> dict:
+def check_question_grammar(q_text: str, lower: str) -> tuple[list[str], list[str], list[str]]:
+    """Manual grammar rules for each speaking question (ignoring specific names/places/objects)."""
+    ql = q_text.lower()
+    ok_list: list[str] = []
+    err_list: list[str] = []
+    tip_list: list[str] = []
+
+    # Set 1
+    if "what's your name" in ql:
+        if re.search(r"\bmy\s+is\s+name\b", lower):
+            err_list.append("Wrong word order: say 'My name is ...' (not 'My is name ...').")
+            tip_list.append("Try saying: 'My name is ...'")
+        elif re.search(r"\bmy\s+name\s+(am|are)\b", lower):
+            err_list.append("Use 'is' (or \"'s\") with 'my name', not 'am' or 'are'.")
+            tip_list.append("Try saying: 'My name is ...'")
+        elif re.search(r"\bmy\s+name\s+[a-z]+\b", lower) and not re.search(r"\bmy\s+name\s+(is|'s)\b", lower):
+            err_list.append("Missing verb 'is' in 'My name is ...'.")
+            tip_list.append("Try saying: 'My name is ...'")
+        elif re.search(r"\b(my\s+name\s+(is|'s)|i\s+(am|'m))\s+[a-z]+\b", lower):
+            ok_list.append("Name grammar is right ('My name is ...' / 'I am ...').")
+
+    if "where are you from" in ql:
+        if re.search(r"\bfrom\s+i\b", lower):
+            err_list.append("Wrong word order: say 'I am from ...' (not 'from I ...').")
+            tip_list.append("Try saying: 'I am from ...'")
+        elif re.search(r"\bi\s+from\s+[a-z]+\b", lower) and not re.search(r"\bi\s+(am|'m)\s+from\b", lower):
+            err_list.append("Missing verb 'am' before 'from': say 'I am from ...' (not 'I from ...').")
+            tip_list.append("Try saying: 'I am from ...'")
+        elif re.search(r"\b(i\s+(am|'m)|we\s+(am|'m|are|'re))\s+[a-z]+\b", lower) and not re.search(r"\b(am|are|'m|'re)\s+from\b", lower):
+            err_list.append("Missing 'from' when saying where you are from.")
+            tip_list.append("Try saying: 'I am from ...'")
+        elif re.search(r"\b(i\s+(am|'m)|we\s+(are|'re))\s+from\s+[a-z]+\b", lower):
+            ok_list.append("Origin grammar is right ('I am from ...').")
+
+    if "how do you spell it" in ql:
+        if re.search(r"\b(i\s+spell|it\s+is\s+spelled|it's\s+spelled|spelled)\b", lower):
+            ok_list.append("Spelling answer grammar is clear.")
+
+    # Set 2
+    if "are you on holiday" in ql:
+        if re.search(r"\b(i\s+am|i'm|i\s+am\s+not|i'm\s+not)\s+on\s+(a\s+)?holiday\b", lower):
+            ok_list.append("'... on holiday' grammar is right.")
+        elif re.search(r"\b(i\s+am|i'm|i\s+am\s+not|i'm\s+not)\s+holiday\b", lower):
+            err_list.append("Missing 'on' before 'holiday': say 'I am on holiday' or 'I am not on holiday'.")
+            tip_list.append("Try saying: 'No, I am not on holiday.'")
+
+    if "are you late" in ql:
+        if re.search(r"\b(i\s+am|i'm|i\s+am\s+not|i'm\s+not)\s+late\b", lower):
+            ok_list.append("'... late' grammar is right.")
+
+    if "are you from england" in ql:
+        if re.search(r"\b(i\s+am|i'm|i\s+am\s+not|i'm\s+not)\s+from\b", lower):
+            ok_list.append("'... from ...' grammar is right.")
+
+    # Set 3 & 4 & 5 (he/she/they with be)
+    if any(k in ql for k in ("who is she", "how old is she", "is she from russia", "where's he from", "is he married", "is he from egypt")):
+        if re.search(r"\b(he|she)\s+(am|are)\b", lower):
+            err_list.append("Use 'is' (not 'am' or 'are') with 'he' or 'she'.")
+            tip_list.append("Try saying: 'She is ...' or 'He is ...'")
+        elif re.search(r"\b(he|she)\s+(is|'s|isn't|is\s+not)\b", lower):
+            ok_list.append("Singular 'he/she + is' grammar is right.")
+
+    if any(k in ql for k in ("who are they", "are they mexican", "where are they from")):
+        if re.search(r"\bthey\s+(am|is)\b", lower):
+            err_list.append("Use 'are' (not 'am' or 'is') with 'they'.")
+            tip_list.append("Try saying: 'They are ...'")
+        elif re.search(r"\bthey\s+(are|'re|aren't|are\s+not)\b", lower):
+            ok_list.append("Plural 'they + are' grammar is right.")
+
+    # Set 6 & 7 (possessives & 'is')
+    if any(k in ql for k in ("what's your email", "phone number", "when's the concert", "woman's name", "email address")):
+        if re.search(r"\b(it|my\s+email|my\s+number|her\s+name|his\s+name)\s+(is|'s)\b", lower):
+            ok_list.append("Singular '... is ...' grammar is right.")
+
+    # Set 8 & 11 (this/that/these/those)
+    if any(k in ql for k in ("who is this", "that your brother or sister", "how much is this")):
+        if re.search(r"\b(this|that|it)\s+(is|'s)\b", lower):
+            ok_list.append("Singular 'this/that/it + is' grammar is right.")
+
+    if any(k in ql for k in ("who are those girls", "how much are these", "how much are those")):
+        if re.search(r"\b(these|those|they)\s+(are|'re)\b", lower):
+            ok_list.append("Plural 'these/those/they + are' grammar is right.")
+
+    # Set 9 (whose)
+    if "whose" in ql:
+        if re.search(r"\b(it|this|that|they)\s+(is|'s|are|'re)\b", lower):
+            ok_list.append("Possessive answer structure is clear.")
+
+    # Set 10, 12, 13, 14, 15 (have / can / do / does / don't / doesn't)
+    if "can i have" in ql:
+        if re.search(r"\bcan\s+i\s+have\b", lower):
+            ok_list.append("'Can I have ...' request grammar is right.")
+
+    if any(k in ql for k in ("do you have", "what do you have")):
+        if re.search(r"\bi\s+(have|'ve|don't\s+have|do\s+not\s+have)\b", lower):
+            ok_list.append("'I have / don't have ...' grammar is right.")
+
+    if any(k in ql for k in ("what time do you get up", "where do you live", "what do you do in the evening", "where do you work or study", "do you speak english", "do you go to english classes")):
+        if re.search(r"\bi\s+(get|live|do|work|study|speak|go|don't\s+[a-z]+|do\s+not\s+[a-z]+)\b", lower):
+            ok_list.append("Present simple 'I + verb' grammar is right.")
+
+    if any(k in ql for k in ("what do you have for breakfast", "what don't you have for lunch")):
+        if re.search(r"\bi\s+(have|don't\s+have|do\s+not\s+have)\b", lower):
+            ok_list.append("'I have / don't have ...' grammar is right.")
+
+    if "what don't they have for dinner" in ql:
+        if re.search(r"\bthey\s+(have|don't\s+have|do\s+not\s+have)\b", lower):
+            ok_list.append("'They have / don't have ...' grammar is right.")
+
+    return ok_list, err_list, tip_list
+
+
+def manual_grammar_check(questions: list[str], transcript: str, has_audio: bool) -> dict:
+    """100% manual Python grammar checker (no external AI calls)."""
     clean = re.sub(r"\s+", " ", (transcript or "").strip())
     lower = clean.lower()
     words = re.findall(r"[A-Za-z']+", clean)
 
-    correct = []
-    mistakes = []
-    better = []
+    correct: list[str] = []
+    mistakes: list[str] = []
+    better: list[str] = []
 
     if not clean:
         if has_audio:
             correct.append("Voice recording was captured.")
-            mistakes.append("No clear English words were picked up yet. Speak clearly into the mic and tap Submit.")
-            better.append("Try saying: 'No, I am not on holiday. No, I am not late. No, I am not from England.'")
+            mistakes.append("No clear English words were heard yet. Speak clearly into the mic and tap Submit.")
+            better.append("Try saying: 'My name is ... I am from ...'")
         else:
             mistakes.append("Tap Mic, speak your answer, tap Stop, and tap Submit.")
-            better.append("Try saying: 'My name is Zameer.'")
+            better.append("Try saying: 'My name is ...'")
         return {
             "passed": False,
             "transcript": "(voice recorded)" if has_audio else "(no speech heard)",
@@ -517,25 +617,18 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
             "better": better,
         }
 
+    # Global beginner grammar rules (independent of specific name/place/object nouns)
     if re.search(r"\bi\s+not\b", lower):
-        mistakes.append("Use 'am not' (or \"'m not\") with 'I', not 'I not' (for example: 'I am not late').")
-        better.append("Try saying: 'No, I am not late.'")
+        mistakes.append("Use 'am not' (or \"'m not\") with 'I', not 'I not'.")
+        better.append("Try saying: 'I am not ...'")
 
     if re.search(r"\b(he|she|it)\s+not\b", lower):
         mistakes.append("Use 'is not' (or \"isn't\") with 'he', 'she', or 'it', not just 'not'.")
+        better.append("Try saying: 'She is not ...' or 'He is not ...'")
 
     if re.search(r"\b(we|they|you)\s+not\b", lower):
         mistakes.append("Use 'are not' (or \"aren't\") with 'we', 'they', or 'you', not just 'not'.")
-
-    if re.search(r"\b(my name|this|that|it|he|she)\s+(zameer|zamir|ali|ahmed|sara|good|fine|okay|ok|here|there|from)\b", lower):
-        if not re.search(r"\b(my name|this|that|it|he|she)\s+(is|'s|was)\b", lower):
-            mistakes.append("Missing verb 'is' (for example, say 'My name is Zameer' instead of 'My name Zameer').")
-            better.append("Try saying: 'My name is Zameer.'")
-
-    if re.search(r"\b(i)\s+(zameer|zamir|from|student|teacher|fine|good|ok|okay|ready|here)\b", lower):
-        if not re.search(r"\bi\s+(am|'m|was)\b", lower):
-            mistakes.append("Missing verb 'am' after 'I' (for example, say 'I am from...' instead of 'I from...').")
-            better.append("Try saying: 'I am from Tajikistan.'")
+        better.append("Try saying: 'They are not ...' or 'We are not ...'")
 
     if re.search(r"\bi\s+(is|are)\b", lower):
         mistakes.append("With 'I', use 'am' (not 'is' or 'are').")
@@ -549,33 +642,30 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
         mistakes.append("With 'we', 'they', or 'you', use 'are'.")
         better.append("Try saying: 'We are ...' or 'They are ...'")
 
-    if re.search(r"\b(am|is|are|not)\s+(england|russia|egypt|mexico|canada|turkey|tajikistan|america|china|spain|france|germany)\b", lower):
-        mistakes.append("Use 'from' before a country or place when saying where someone is from (for example: 'not from England').")
-        better.append("Try saying: 'No, I am not from England.'")
-
     if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
         mistakes.append("With 'he', 'she', or 'it', add '-s' or '-es' to the verb (for example: 'has', 'does', 'goes', 'lives', 'works').")
 
     if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
-        mistakes.append("Use 'an' before a vowel sound (for example: 'an orange', 'an old house', 'an umbrella').")
+        mistakes.append("Use 'an' before a vowel sound (for example: 'an orange', 'an old ...', 'an umbrella').")
 
     if re.search(r"\b(no\s+i\s+am\s+no|i\s+am\s+no|no\s+no)\b", lower):
-        mistakes.append("Avoid repeating 'no' or cutting off mid-sentence—pause briefly and say each full answer clearly.")
+        mistakes.append("Avoid repeating 'no'—say each sentence cleanly.")
 
-    if re.search(r"\b(i\s+am\s+not|i'm\s+not)\s+on\s+(a\s+)?holiday\b", lower):
-        correct.append("'I am not on holiday' is clear and grammatically right.")
+    # Per-question manual grammar checks
+    for q_text in questions:
+        q_ok, q_err, q_tip = check_question_grammar(q_text, lower)
+        for item in q_ok:
+            if item not in correct:
+                correct.append(item)
+        for item in q_err:
+            if item not in mistakes:
+                mistakes.append(item)
+        for item in q_tip:
+            if item not in better:
+                better.append(item)
 
-    if any(q.lower().startswith("what's your name") for q in questions) and re.search(r"\b(my name is|i am|i'm)\b", lower):
-        correct.append("Answered the name question clearly.")
-
-    if any("where are you from" in q.lower() for q in questions) and re.search(r"\b(from|am from|'m from)\b", lower):
-        correct.append("Answered where you are from clearly.")
-
-    if not mistakes and len(words) >= 2:
+    if not mistakes and not correct and len(words) >= 2:
         correct.append(f"Clear sentence structure heard ({len(words)} words).")
-
-    if not better and mistakes:
-        better.append("Try saying: 'No, I am not on holiday. No, I am not late. No, I am not from England.'")
 
     passed = len(mistakes) == 0 and len(words) >= 2
 
@@ -588,69 +678,6 @@ def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool
     }
 
 
-def ai_check_speaking(
-    questions: list[str],
-    transcript: str,
-    has_audio: bool,
-    api_key: str,
-) -> dict:
-    clean_tx = (transcript or "").strip()
-
-    if not api_key:
-        res = builtin_grammar_check(questions, clean_tx, has_audio)
-        res["mistakes"].insert(0, "AI check skipped: no API key found in Secrets (check GEMINI_API_KEY).")
-        res["passed"] = False
-        return res
-
-    if clean_tx:
-        try:
-            from google import genai
-            from google.genai import types
-
-            client = genai.Client(api_key=api_key)
-            prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-            prompt = (
-                "You are a friendly, strict, accurate English tutor for absolute beginners. "
-                "Check EVERY spoken sentence/phrase in the student's transcript against the questions "
-                "for grammar, missing verbs like 'am/is/are', missing prepositions like 'from', "
-                "spelling/word-recognition glitches from speech-to-text, and unclear/choppy phrasing "
-                "using simple beginner English.\n"
-                "Return ONLY valid JSON with these exact keys:\n"
-                "- passed: boolean (true only if the grammar and answers are genuinely correct)\n"
-                "- correct: list of short strings for parts that are actually right\n"
-                "- mistakes: list of short strings for every grammar or phrasing mistake\n"
-                "- better: list of short 'Try saying: ...' examples\n\n"
-                f"Questions:\n{prompt_block}\n\n"
-                f"Student spoken words:\n{clean_tx}"
-            )
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
-            raw_text = (getattr(response, "text", "") or "").strip()
-            json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
-            data = json.loads(json_match.group(0) if json_match else raw_text)
-
-            mistakes_list = [str(x) for x in data.get("mistakes", []) if x]
-            return {
-                "passed": bool(data.get("passed", len(mistakes_list) == 0)) and len(mistakes_list) == 0,
-                "transcript": clean_tx,
-                "correct": [str(x) for x in data.get("correct", []) if x],
-                "mistakes": mistakes_list,
-                "better": [str(x) for x in data.get("better", []) if x],
-            }
-        except Exception as e:
-            res = builtin_grammar_check(questions, clean_tx, has_audio)
-            res["mistakes"].insert(0, f"Gemini error (using fallback): {type(e).__name__}: {e}")
-            res["passed"] = False
-            return res
-
-    return builtin_grammar_check(questions, clean_tx, has_audio)
-
-
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
     s = re.sub(r"\s+([?.!,])", r"\1", s)
@@ -660,12 +687,12 @@ def normalize_str(s: str) -> str:
 def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> str:
     if is_correct:
         return (
-            f"**AI Tutor Feedback — Great job!**\n"
+            f"**Tutor Feedback — Great job!**\n"
             f"- **Why it works:** {q['rule']}\n"
             f"- **Next step:** Tap **🔊 Listen** and say the full sentence out loud."
         )
     expected = q.get("answer") or q.get("correct", "")
-    tips = ["**AI Tutor Feedback — Let's fix this together:**"]
+    tips = ["**Tutor Feedback — Let's fix this together:**"]
     if not user_answer.strip():
         tips.append("- **Problem:** No answer was entered yet.")
     else:
@@ -692,8 +719,6 @@ if "sp_results" not in st.session_state:
 if "last_sp_ts" not in st.session_state:
     st.session_state.last_sp_ts = ""
 
-api_key = get_api_key()
-
 sp_item_param = st.query_params.get("sp_item")
 sp_ts_param = st.query_params.get("sp_ts", "")
 if sp_item_param and sp_ts_param and sp_ts_param != st.session_state.last_sp_ts:
@@ -705,11 +730,10 @@ if sp_item_param and sp_ts_param and sp_ts_param != st.session_state.last_sp_ts:
         st.session_state.last_sp_ts = sp_ts_param
         if 1 <= sub_item <= 15:
             st.session_state.sp_index = sub_item - 1
-            st.session_state.sp_results[sub_item] = ai_check_speaking(
+            st.session_state.sp_results[sub_item] = manual_grammar_check(
                 q_lookup,
                 sub_tx,
                 has_rec,
-                api_key,
             )
     except Exception:
         pass
@@ -778,7 +802,7 @@ if section.startswith("1."):
         if was_ok:
             st.success("✅ Correct!")
         else:
-            st.error("❌ Not quite right — check the AI Tutor feedback below.")
+            st.error("❌ Not quite right — check the Tutor feedback below.")
         st.markdown(grammar_ai_tutor_feedback(q, ans_val, was_ok))
 
     col_prev, col_next, col_score = st.columns([1, 1, 2])
