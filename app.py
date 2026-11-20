@@ -310,6 +310,8 @@ def mic_recorder(key_id: str, item_no: int):
         let chunks_{safe_id} = [];
         let timerInterval_{safe_id} = null;
         let seconds_{safe_id} = 0;
+        let speechRec_{safe_id} = null;
+        let liveTranscript_{safe_id} = "";
 
         function formatTime_{safe_id}(sec) {{
             const m = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -317,15 +319,49 @@ def mic_recorder(key_id: str, item_no: int):
             return m + ":" + s;
         }}
 
-        function saveAudioToParent_{safe_id}(base64Data, mimeType) {{
+        function saveAudioToParent_{safe_id}(base64Data, mimeType, transcriptText) {{
             try {{
                 if (!window.top.__spAudioStore) window.top.__spAudioStore = {{}};
                 window.top.__spAudioStore[{item_no}] = {{
                     base64: base64Data,
                     mime: mimeType,
-                    name: "recording.webm"
+                    name: "recording.webm",
+                    transcript: transcriptText || ""
                 }};
             }} catch (e) {{}}
+        }}
+
+        function startSpeechCapture_{safe_id}() {{
+            liveTranscript_{safe_id} = "";
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) return;
+            try {{
+                const sr = new SR();
+                sr.lang = "en-US";
+                sr.continuous = true;
+                sr.interimResults = true;
+                sr.onresult = (event) => {{
+                    let full = "";
+                    for (let i = 0; i < event.results.length; i++) {{
+                        full += event.results[i][0].transcript + " ";
+                    }}
+                    liveTranscript_{safe_id} = full.trim();
+                    try {{
+                        if (window.top && window.top.__spAudioStore && window.top.__spAudioStore[{item_no}]) {{
+                            window.top.__spAudioStore[{item_no}].transcript = liveTranscript_{safe_id};
+                        }}
+                    }} catch (e) {{}}
+                }};
+                sr.start();
+                speechRec_{safe_id} = sr;
+            }} catch (e) {{}}
+        }}
+
+        function stopSpeechCapture_{safe_id}() {{
+            if (speechRec_{safe_id}) {{
+                try {{ speechRec_{safe_id}.stop(); }} catch (e) {{}}
+                speechRec_{safe_id} = null;
+            }}
         }}
 
         async function toggleMic_{safe_id}() {{
@@ -336,6 +372,7 @@ def mic_recorder(key_id: str, item_no: int):
 
             if (recorder_{safe_id} && recorder_{safe_id}.state === "recording") {{
                 recorder_{safe_id}.stop();
+                stopSpeechCapture_{safe_id}();
                 clearInterval(timerInterval_{safe_id});
                 btn.textContent = "🎙️ Mic";
                 btn.style.background = "#DC2626";
@@ -370,12 +407,13 @@ def mic_recorder(key_id: str, item_no: int):
                     reader.onloadend = () => {{
                         const dataUrl = reader.result || "";
                         const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : "";
-                        saveAudioToParent_{safe_id}(base64Data, mimeType);
+                        saveAudioToParent_{safe_id}(base64Data, mimeType, liveTranscript_{safe_id});
                     }};
                     reader.readAsDataURL(blob);
                 }};
 
                 recorder_{safe_id}.start();
+                startSpeechCapture_{safe_id}();
                 seconds_{safe_id} = 0;
                 timerEl.textContent = "00:00";
                 clearInterval(timerInterval_{safe_id});
@@ -417,20 +455,30 @@ def submit_bridge_button(item_no: int, key_id: str):
                     rec = window.top.__spAudioStore[{item_no}] || null;
                 }}
             }} catch (e) {{}}
-            if (!rec || !rec.base64) {{
-                msgEl.textContent = "Please record your voice with Mic first.";
-                return;
-            }}
             msgEl.textContent = "Checking voice...";
             try {{
                 const doc = window.top ? window.top.document : document;
                 const inputs = Array.from(doc.querySelectorAll("input[type='text']"));
                 const targetInput = inputs.find(el => el.getAttribute("aria-label") === "__sp_audio_bridge__");
                 if (targetInput) {{
+                    const payload = {{
+                        item: {item_no},
+                        base64: rec && rec.base64 ? rec.base64 : "",
+                        mime: rec && rec.mime ? rec.mime : "audio/webm",
+                        name: rec && rec.name ? rec.name : "recording.webm",
+                        transcript: rec && rec.transcript ? rec.transcript : "",
+                        submitted_at: Date.now()
+                    }};
                     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                    nativeSetter.call(targetInput, JSON.stringify({{ item: {item_no}, base64: rec.base64, mime: rec.mime, name: rec.name }}));
+                    nativeSetter.call(targetInput, JSON.stringify(payload));
                     targetInput.dispatchEvent(new Event("input", {{ bubbles: true }}));
                     targetInput.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                    targetInput.blur();
+                }}
+                const btns = Array.from(doc.querySelectorAll("button"));
+                const runBtn = btns.find(b => b.innerText && b.innerText.trim() === "Check Grammar");
+                if (runBtn) {{
+                    setTimeout(() => runBtn.click(), 60);
                 }}
             }} catch (e) {{
                 msgEl.textContent = "Could not send audio.";
@@ -442,81 +490,146 @@ def submit_bridge_button(item_no: int, key_id: str):
     )
 
 
-def ai_check_speaking(questions: list[str], audio_bytes: bytes, mime_type: str, filename: str, api_key: str) -> dict:
-    if not api_key:
+def builtin_grammar_check(questions: list[str], transcript: str, has_audio: bool) -> dict:
+    clean = re.sub(r"\s+", " ", (transcript or "").strip())
+    lower = clean.lower()
+    words = re.findall(r"[A-Za-z']+", clean)
+
+    correct = []
+    mistakes = []
+    better = []
+
+    if not clean:
+        if has_audio:
+            correct.append("Voice recording was received.")
+            mistakes.append("No clear words were heard yet. Try speaking a full sentence clearly (for example: 'My name is Zameer.').")
+            better.append("Try saying: 'My name is Zameer. I am from Tajikistan.'")
+        else:
+            mistakes.append("Tap Mic, speak your answer out loud, tap Stop, and then tap Submit.")
+            better.append("Try saying: 'My name is Zameer.'")
         return {
             "passed": False,
-            "transcript": "(OPENAI_API_KEY not set in Streamlit Secrets)",
-            "correct": [],
-            "mistakes": ["Add OPENAI_API_KEY in Streamlit Secrets so AI can listen to your voice and check your grammar."],
-            "better": [],
+            "transcript": "(voice recorded)" if has_audio else "(no speech recorded)",
+            "correct": correct,
+            "mistakes": mistakes,
+            "better": better,
         }
 
-    try:
-        from openai import OpenAI
+    if re.search(r"\b(my name|this|that|it|he|she)\s+(zameer|zamir|ali|ahmed|sara|good|fine|okay|ok|here|there|from)\b", lower):
+        if not re.search(r"\b(my name|this|that|it|he|she)\s+(is|'s|was)\b", lower):
+            mistakes.append("Missing verb 'is' (for example, say 'My name is Zameer' instead of 'My name Zameer').")
+            better.append("Try saying: 'My name is Zameer.'")
 
-        client = OpenAI(api_key=api_key)
-        stt = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=(filename, io.BytesIO(audio_bytes), mime_type),
-        )
-        transcript = (getattr(stt, "text", "") or "").strip()
+    if re.search(r"\b(i)\s+(zameer|zamir|from|student|teacher|fine|good|ok|okay|ready|here)\b", lower):
+        if not re.search(r"\bi\s+(am|'m|was)\b", lower):
+            mistakes.append("Missing verb 'am' after 'I' (for example, say 'I am from...' instead of 'I from...').")
+            better.append("Try saying: 'I am from Tajikistan.'")
 
-        if not transcript:
-            return {
-                "passed": False,
-                "transcript": "(no speech heard)",
-                "correct": [],
-                "mistakes": ["No words were heard in your recording. Tap Mic, speak clearly, and tap Submit again."],
-                "better": [],
-            }
+    if re.search(r"\bi\s+(is|are)\b", lower):
+        mistakes.append("With 'I', use 'am' (not 'is' or 'are').")
+        better.append("Try saying: 'I am ...'")
 
-        prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-        response = client.responses.create(
-            model="gpt-4o-mini",
-            input=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a friendly English tutor for absolute beginners. "
-                        "Check the student's spoken transcript against the 3 questions using simple, easy beginner words. "
-                        "Return ONLY valid JSON with keys: "
-                        "passed (boolean), "
-                        "correct (list of short simple strings showing what grammar or answers are right), "
-                        "mistakes (list of short simple strings showing what grammar or answers are wrong), "
-                        "better (list of short simple 'Try saying: ...' strings)."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Questions:\n{prompt_block}\n\nStudent spoken words:\n{transcript}",
-                },
-            ],
-        )
-        raw_text = (getattr(response, "output_text", "") or "").strip()
-        json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
-        data = json.loads(json_match.group(0) if json_match else raw_text)
+    if re.search(r"\b(he|she|it)\s+(am|are)\b", lower):
+        mistakes.append("With 'he', 'she', or 'it', use 'is'.")
+        better.append("Try saying: 'She is ...' or 'He is ...'")
 
-        correct_list = [str(x) for x in data.get("correct", []) if x]
-        mistakes_list = [str(x) for x in data.get("mistakes", []) if x]
-        better_list = [str(x) for x in data.get("better", []) if x]
-        passed_val = bool(data.get("passed", len(mistakes_list) == 0))
+    if re.search(r"\b(we|they|you)\s+(am|is)\b", lower):
+        mistakes.append("With 'we', 'they', or 'you', use 'are'.")
+        better.append("Try saying: 'We are ...' or 'They are ...'")
 
-        return {
-            "passed": passed_val,
-            "transcript": transcript,
-            "correct": correct_list,
-            "mistakes": mistakes_list,
-            "better": better_list,
-        }
-    except Exception as exc:
-        return {
-            "passed": False,
-            "transcript": "(error checking voice)",
-            "correct": [],
-            "mistakes": [f"AI could not check the recording right now: {exc}"],
-            "better": [],
-        }
+    if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
+        mistakes.append("With 'he', 'she', or 'it', add '-s' or '-es' to the verb (for example: 'has', 'does', 'goes', 'lives', 'works').")
+
+    if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
+        mistakes.append("Use 'an' before a vowel sound (for example: 'an orange', 'an old house', 'an umbrella').")
+
+    if len(words) >= 2 and not mistakes:
+        correct.append(f"Clear sentence structure heard ({len(words)} words).")
+
+    if any(q.lower().startswith("what's your name") for q in questions) and re.search(r"\b(my name is|i am|i'm)\b", lower):
+        correct.append("Answered the name question clearly.")
+
+    if any("where are you from" in q.lower() for q in questions) and re.search(r"\b(from|am from|'m from)\b", lower):
+        correct.append("Answered where you are from clearly.")
+
+    passed = len(mistakes) == 0 and len(words) >= 2
+    if passed and not correct:
+        correct.append("Your grammar looks good!")
+
+    if not better and mistakes:
+        better.append("Speak in full simple sentences, such as: 'My name is ...' and 'I am from ...'")
+
+    return {
+        "passed": passed,
+        "transcript": clean,
+        "correct": correct,
+        "mistakes": mistakes,
+        "better": better,
+    }
+
+
+def ai_check_speaking(
+    questions: list[str],
+    audio_bytes: bytes,
+    mime_type: str,
+    filename: str,
+    hint_transcript: str,
+    api_key: str,
+) -> dict:
+    has_audio = bool(audio_bytes)
+    transcript = (hint_transcript or "").strip()
+
+    if api_key and has_audio:
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=api_key)
+            stt = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=(filename, io.BytesIO(audio_bytes), mime_type),
+            )
+            heard = (getattr(stt, "text", "") or "").strip()
+            if heard:
+                transcript = heard
+
+            if transcript:
+                prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+                response = client.responses.create(
+                    model="gpt-4o-mini",
+                    input=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a friendly English tutor for absolute beginners. "
+                                "Check the student's spoken transcript against the questions using simple, easy beginner words. "
+                                "Return ONLY valid JSON with keys: "
+                                "passed (boolean), "
+                                "correct (list of short simple strings showing what grammar or answers are right), "
+                                "mistakes (list of short simple strings showing what grammar or answers are wrong), "
+                                "better (list of short simple 'Try saying: ...' strings)."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Questions:\n{prompt_block}\n\nStudent spoken words:\n{transcript}",
+                        },
+                    ],
+                )
+                raw_text = (getattr(response, "output_text", "") or "").strip()
+                json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
+                data = json.loads(json_match.group(0) if json_match else raw_text)
+
+                return {
+                    "passed": bool(data.get("passed", len(data.get("mistakes", [])) == 0)),
+                    "transcript": transcript,
+                    "correct": [str(x) for x in data.get("correct", []) if x],
+                    "mistakes": [str(x) for x in data.get("mistakes", []) if x],
+                    "better": [str(x) for x in data.get("better", []) if x],
+                }
+        except Exception:
+            pass
+
+    return builtin_grammar_check(questions, transcript, has_audio)
 
 
 def normalize_str(s: str) -> str:
@@ -650,23 +763,25 @@ else:
         key=f"sp_bridge_input_{item_no}",
         label_visibility="collapsed",
     )
-    if bridge_raw and bridge_raw.startswith("{"):
+    if st.button("Check Grammar", key=f"run_sp_check_{item_no}") or (bridge_raw and bridge_raw.startswith("{")):
         try:
-            sub_obj = json.loads(bridge_raw)
-            if int(sub_obj.get("item", 0)) == item_no and sub_obj.get("base64"):
-                raw_bytes = base64.b64decode(sub_obj["base64"])
-                mime = sub_obj.get("mime") or "audio/webm"
-                fname = sub_obj.get("name") or "recording.webm"
-                with st.spinner("AI is checking your voice..."):
-                    st.session_state.sp_results[item_no] = ai_check_speaking(
-                        three_qs,
-                        raw_bytes,
-                        mime,
-                        fname,
-                        api_key,
-                    )
+            sub_obj = json.loads(bridge_raw) if (bridge_raw and bridge_raw.startswith("{")) else {}
+            b64_str = sub_obj.get("base64", "")
+            raw_bytes = base64.b64decode(b64_str) if b64_str else b""
+            mime = sub_obj.get("mime") or "audio/webm"
+            fname = sub_obj.get("name") or "recording.webm"
+            hint_tx = sub_obj.get("transcript") or ""
+            with st.spinner("Checking your speaking..."):
+                st.session_state.sp_results[item_no] = ai_check_speaking(
+                    three_qs,
+                    raw_bytes,
+                    mime,
+                    fname,
+                    hint_tx,
+                    api_key,
+                )
         except Exception:
-            pass
+            st.session_state.sp_results[item_no] = builtin_grammar_check(three_qs, "", True)
 
     res = st.session_state.sp_results.get(item_no)
     if res:
