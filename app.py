@@ -605,6 +605,7 @@ def ai_check_speaking(
     if clean_tx:
         try:
             from google import genai
+            from google.genai import types
 
             client = genai.Client(api_key=api_key)
             prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
@@ -612,7 +613,8 @@ def ai_check_speaking(
                 "You are a friendly, strict, accurate English tutor for absolute beginners. "
                 "Check EVERY spoken sentence/phrase in the student's transcript against the questions "
                 "for grammar, missing verbs like 'am/is/are', missing prepositions like 'from', "
-                "and unclear/choppy phrasing using simple beginner English.\n"
+                "spelling/word-recognition glitches from speech-to-text, and unclear/choppy phrasing "
+                "using simple beginner English.\n"
                 "Return ONLY valid JSON with these exact keys:\n"
                 "- passed: boolean (true only if the grammar and answers are genuinely correct)\n"
                 "- correct: list of short strings for parts that are actually right\n"
@@ -622,8 +624,11 @@ def ai_check_speaking(
                 f"Student spoken words:\n{clean_tx}"
             )
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.8-flash",
                 contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                ),
             )
             raw_text = (getattr(response, "text", "") or "").strip()
             json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
