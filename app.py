@@ -1,10 +1,8 @@
 import html
-import io
-import math
+import json
 import re
-import struct
-import wave
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="English Learning Interactive Quiz & Speaking Grader",
@@ -232,49 +230,140 @@ SPEAKING_15_ITEMS = [
 ]
 
 
-@st.cache_data(show_spinner=False)
-def build_question_audio_wav(text: str) -> bytes:
-    """Generates a valid WAV audio stream representing each spoken sentence/question."""
-    sample_rate = 22050
-    parts = [p.strip() for p in re.split(r"(?<=[?.!])\s+", text.strip()) if p.strip()]
-    if not parts:
-        parts = [text.strip() or "Question"]
+def listen_button(text: str, key_id: str):
+    lines = text if isinstance(text, list) else [text]
+    payload = json.dumps(lines)
+    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    components.html(
+        f"""
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:sans-serif;">
+            <button type="button" id="listen_btn_{safe_id}" onclick="readAloud_{safe_id}()"
+                style="background:#2563EB;color:#FFFFFF;border:none;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">
+                🔊 Listen
+            </button>
+            <span id="listen_status_{safe_id}" style="color:#E2E8F0;font-size:13px;"></span>
+        </div>
+        <script>
+        function readAloud_{safe_id}() {{
+            const items = {payload};
+            const statusEl = document.getElementById("listen_status_{safe_id}");
+            if (!("speechSynthesis" in window)) {{
+                statusEl.textContent = items.join(" ");
+                return;
+            }}
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.resume();
+            const voices = window.speechSynthesis.getVoices();
+            const enVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith("en")) || null;
+            statusEl.textContent = "Reading...";
+            items.forEach((line, idx) => {{
+                const u = new SpeechSynthesisUtterance(line);
+                u.lang = "en-US";
+                u.rate = 0.95;
+                if (enVoice) u.voice = enVoice;
+                if (idx === items.length - 1) {{
+                    u.onend = () => {{ statusEl.textContent = ""; }};
+                    u.onerror = () => {{ statusEl.textContent = ""; }};
+                }}
+                window.speechSynthesis.speak(u);
+            }});
+        }}
+        if ("speechSynthesis" in window && window.speechSynthesis.onvoiceschanged !== undefined) {{
+            window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+        }}
+        </script>
+        """,
+        height=54,
+    )
 
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
 
-        for idx, sentence in enumerate(parts):
-            words = max(1, len(sentence.split()))
-            duration = min(2.4, max(0.7, words * 0.16))
-            num_samples = int(sample_rate * duration)
-            base_freq = 440.0 + (idx * 55.0)
-            frames = bytearray()
+def mic_recorder(key_id: str):
+    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    components.html(
+        f"""
+        <div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="mic_btn_{safe_id}" onclick="toggleMic_{safe_id}()"
+                    style="background:#DC2626;color:#FFFFFF;border:none;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">
+                    🎙️ Mic
+                </button>
+                <span id="mic_status_{safe_id}" style="color:#F8FAFC;font-size:13px;font-weight:600;">Ready to record</span>
+                <span id="mic_timer_{safe_id}" style="color:#FBBF24;font-size:13px;font-weight:700;">00:00</span>
+            </div>
+            <audio id="mic_player_{safe_id}" controls style="width:100%;margin-top:12px;display:none;"></audio>
+        </div>
+        <script>
+        let recorder_{safe_id} = null;
+        let stream_{safe_id} = null;
+        let chunks_{safe_id} = [];
+        let timerInterval_{safe_id} = null;
+        let seconds_{safe_id} = 0;
 
-            for i in range(num_samples):
-                t = i / sample_rate
-                envelope = math.sin(math.pi * min(1.0, i / max(1, num_samples - 1)))
-                word_mod = 1.0 + 0.15 * math.sin(2 * math.pi * (words / duration) * t)
-                sample = 0.25 * envelope * math.sin(2 * math.pi * base_freq * word_mod * t)
-                frames.extend(struct.pack("<h", int(max(-32767, min(32767, sample * 32767)))))
+        function formatTime_{safe_id}(sec) {{
+            const m = String(Math.floor(sec / 60)).padStart(2, "0");
+            const s = String(sec % 60).padStart(2, "0");
+            return m + ":" + s;
+        }}
 
-            wf.writeframes(bytes(frames))
+        async function toggleMic_{safe_id}() {{
+            const btn = document.getElementById("mic_btn_{safe_id}");
+            const statusEl = document.getElementById("mic_status_{safe_id}");
+            const timerEl = document.getElementById("mic_timer_{safe_id}");
+            const player = document.getElementById("mic_player_{safe_id}");
 
-            pause_samples = int(sample_rate * 0.25)
-            wf.writeframes(b"\x00\x00" * pause_samples)
+            if (recorder_{safe_id} && recorder_{safe_id}.state === "recording") {{
+                recorder_{safe_id}.stop();
+                clearInterval(timerInterval_{safe_id});
+                btn.textContent = "🎙️ Mic";
+                btn.style.background = "#DC2626";
+                statusEl.textContent = "Recorded";
+                return;
+            }}
 
-    return buf.getvalue()
+            try {{
+                if (stream_{safe_id}) {{
+                    stream_{safe_id}.getTracks().forEach(t => t.stop());
+                }}
+                stream_{safe_id} = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+                chunks_{safe_id} = [];
+                recorder_{safe_id} = new MediaRecorder(stream_{safe_id});
 
+                recorder_{safe_id}.ondataavailable = (e) => {{
+                    if (e.data && e.data.size > 0) {{
+                        chunks_{safe_id}.push(e.data);
+                    }}
+                }};
 
-def listen_widget(text: str, key_id: str):
-    if st.button("🔊 Listen", key=f"btn_listen_{key_id}"):
-        st.session_state[f"play_listen_{key_id}"] = True
+                recorder_{safe_id}.onstop = () => {{
+                    const blob = new Blob(chunks_{safe_id}, {{ type: recorder_{safe_id}.mimeType || "audio/webm" }});
+                    const url = URL.createObjectURL(blob);
+                    player.src = url;
+                    player.style.display = "block";
+                    if (stream_{safe_id}) {{
+                        stream_{safe_id}.getTracks().forEach(t => t.stop());
+                    }}
+                }};
 
-    if st.session_state.get(f"play_listen_{key_id}"):
-        wav_bytes = build_question_audio_wav(text)
-        st.audio(wav_bytes, format="audio/wav")
+                recorder_{safe_id}.start();
+                seconds_{safe_id} = 0;
+                timerEl.textContent = "00:00";
+                clearInterval(timerInterval_{safe_id});
+                timerInterval_{safe_id} = setInterval(() => {{
+                    seconds_{safe_id} += 1;
+                    timerEl.textContent = formatTime_{safe_id}(seconds_{safe_id});
+                }}, 1000);
+
+                btn.textContent = "⏹ Stop";
+                btn.style.background = "#059669";
+                statusEl.textContent = "Recording...";
+            }} catch (err) {{
+                statusEl.textContent = "Mic error: " + (err && err.message ? err.message : "Allow microphone permission");
+            }}
+        }}
+        </script>
+        """,
+        height=135,
+    )
 
 
 def normalize_str(s: str) -> str:
@@ -286,17 +375,22 @@ def normalize_str(s: str) -> str:
 def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> str:
     if is_correct:
         return (
-            f"**Feedback — Great job!**\n"
-            f"- **Rule:** {q['rule']}"
+            f"**AI Tutor Feedback — Great job!**\n"
+            f"- **Why it works:** {q['rule']}\n"
+            f"- **Next step:** Tap **🔊 Listen** and say the full sentence out loud."
         )
     expected = q.get("answer") or q.get("correct", "")
-    tips = ["**Feedback — Check this:**"]
+    tips = ["**AI Tutor Feedback — Let's fix this together:**"]
     if not user_answer.strip():
-        tips.append("- No answer was entered yet.")
+        tips.append("- **Problem:** No answer was entered yet.")
     else:
         tips.append(f"- **Your answer:** `{user_answer.strip()}`")
+        if re.search(r"\bi\b", user_answer):
+            tips.append("- **Capitalization:** Always write the subject pronoun **I** as a capital letter.")
+        if q.get("num", 0) >= 11 and not user_answer.strip().endswith((".", "?")):
+            tips.append("- **Punctuation:** End your sentence with a period (`.`) or question mark (`?`).")
     tips.append(f"- **Correct target:** **{expected}**")
-    tips.append(f"- **Rule:** {q['rule']}")
+    tips.append(f"- **Grammar rule:** {q['rule']}")
     return "\n".join(tips)
 
 
@@ -313,7 +407,7 @@ st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Listen &amp; Voice Recorder</p>
+        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Listen &amp; 🎙️ Mic</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -334,7 +428,7 @@ if section.startswith("1."):
 
     if q_num <= 10:
         st.markdown(f'<div class="q-prompt">{html.escape(q["prompt"])}</div>', unsafe_allow_html=True)
-        listen_widget(q["pronounce"], key_id=f"gram_{q_num}")
+        listen_button(q["pronounce"], key_id=f"gram_{q_num}")
         selected = st.radio("Choose one option:", q["options"], index=None, key=f"radio_q_{q_num}")
         if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
             if selected is None:
@@ -347,7 +441,7 @@ if section.startswith("1."):
     else:
         st.markdown('<div class="q-prompt">Arrange the mixed words into a full correct sentence:</div>', unsafe_allow_html=True)
         st.code(q["mixed"], language="text")
-        listen_widget(q["pronounce"], key_id=f"gram_{q_num}")
+        listen_button(q["pronounce"], key_id=f"gram_{q_num}")
         typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
         if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
             norm_u = normalize_str(typed)
@@ -366,7 +460,7 @@ if section.startswith("1."):
         if was_ok:
             st.success("✅ Correct!")
         else:
-            st.error("❌ Not quite right — check the feedback below.")
+            st.error("❌ Not quite right — check the AI Tutor feedback below.")
         st.markdown(grammar_ai_tutor_feedback(q, ans_val, was_ok))
 
     col_prev, col_next, col_score = st.columns([1, 1, 2])
@@ -390,13 +484,8 @@ else:
     for i, sq in enumerate(three_qs, start=1):
         st.markdown(f"**{i}. {sq}**")
 
-    listen_widget(" ".join(three_qs), key_id=f"spk_set_{item_no}")
-
-    audio_rec = st.audio_input("Record Voice", key=f"audio_rec_{item_no}") if hasattr(st, "audio_input") else None
-
-    if audio_rec is not None:
-        st.success(f"Recorded ({len(audio_rec.getvalue()):,} bytes).")
-        st.audio(audio_rec, format="audio/wav")
+    listen_button(three_qs, key_id=f"spk_set_{item_no}")
+    mic_recorder(key_id=f"mic_set_{item_no}")
 
     prev_col, next_col = st.columns(2)
     with prev_col:
