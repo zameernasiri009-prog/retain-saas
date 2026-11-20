@@ -1,5 +1,8 @@
+import base64
 import html
+import io
 import json
+import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -230,6 +233,15 @@ SPEAKING_15_ITEMS = [
 ]
 
 
+def get_api_key() -> str:
+    try:
+        if "OPENAI_API_KEY" in st.secrets and st.secrets["OPENAI_API_KEY"]:
+            return str(st.secrets["OPENAI_API_KEY"]).strip()
+    except Exception:
+        pass
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
 def listen_button(text: str, key_id: str):
     lines = text if isinstance(text, list) else [text]
     payload = json.dumps(lines)
@@ -366,6 +378,83 @@ def mic_recorder(key_id: str):
     )
 
 
+def ai_check_speaking(questions: list[str], audio_bytes: bytes, mime_type: str, filename: str, api_key: str) -> dict:
+    if not api_key:
+        return {
+            "passed": False,
+            "transcript": "(OPENAI_API_KEY not set in Streamlit Secrets)",
+            "correct": [],
+            "mistakes": ["Add OPENAI_API_KEY in Streamlit Secrets so AI can listen to your voice and check your grammar."],
+            "better": [],
+        }
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        stt = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(filename, io.BytesIO(audio_bytes), mime_type),
+        )
+        transcript = (getattr(stt, "text", "") or "").strip()
+
+        if not transcript:
+            return {
+                "passed": False,
+                "transcript": "(no speech heard)",
+                "correct": [],
+                "mistakes": ["No words were heard in your recording. Tap Mic, speak clearly, and tap Submit again."],
+                "better": [],
+            }
+
+        prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a friendly English tutor for absolute beginners. "
+                        "Check the student's spoken transcript against the 3 questions using simple, easy beginner words. "
+                        "Return ONLY valid JSON with keys: "
+                        "passed (boolean), "
+                        "correct (list of short simple strings showing what grammar or answers are right), "
+                        "mistakes (list of short simple strings showing what grammar or answers are wrong), "
+                        "better (list of short simple 'Try saying: ...' strings)."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Questions:\n{prompt_block}\n\nStudent spoken words:\n{transcript}",
+                },
+            ],
+        )
+        raw_text = (getattr(response, "output_text", "") or "").strip()
+        json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
+        data = json.loads(json_match.group(0) if json_match else raw_text)
+
+        correct_list = [str(x) for x in data.get("correct", []) if x]
+        mistakes_list = [str(x) for x in data.get("mistakes", []) if x]
+        better_list = [str(x) for x in data.get("better", []) if x]
+        passed_val = bool(data.get("passed", len(mistakes_list) == 0))
+
+        return {
+            "passed": passed_val,
+            "transcript": transcript,
+            "correct": correct_list,
+            "mistakes": mistakes_list,
+            "better": better_list,
+        }
+    except Exception as exc:
+        return {
+            "passed": False,
+            "transcript": "(error checking voice)",
+            "correct": [],
+            "mistakes": [f"AI could not check the recording right now: {exc}"],
+            "better": [],
+        }
+
+
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
     s = re.sub(r"\s+([?.!,])", r"\1", s)
@@ -402,6 +491,10 @@ if "scores" not in st.session_state:
     st.session_state.scores = {}
 if "sp_index" not in st.session_state:
     st.session_state.sp_index = 0
+if "sp_results" not in st.session_state:
+    st.session_state.sp_results = {}
+
+api_key = get_api_key()
 
 st.markdown(
     """
@@ -486,6 +579,54 @@ else:
 
     listen_button(three_qs, key_id=f"spk_set_{item_no}")
     mic_recorder(key_id=f"mic_set_{item_no}")
+
+    voice_file = st.audio_input("Voice for Submit", key=f"voice_submit_{item_no}") if hasattr(st, "audio_input") else None
+
+    if st.button("Submit", type="primary", key=f"submit_voice_{item_no}"):
+        if voice_file is None:
+            st.session_state.sp_results[item_no] = {
+                "passed": False,
+                "transcript": "(no voice recorded yet)",
+                "correct": [],
+                "mistakes": ["Please record your voice first, then tap Submit."],
+                "better": [],
+            }
+        else:
+            raw_bytes = voice_file.getvalue()
+            mime = getattr(voice_file, "type", None) or "audio/wav"
+            fname = getattr(voice_file, "name", None) or "recording.wav"
+            with st.spinner("AI is checking your voice..."):
+                st.session_state.sp_results[item_no] = ai_check_speaking(
+                    three_qs,
+                    raw_bytes,
+                    mime,
+                    fname,
+                    api_key,
+                )
+
+    res = st.session_state.sp_results.get(item_no)
+    if res:
+        if res["passed"]:
+            st.success("✅ Good job! Your grammar looks right.")
+        else:
+            st.warning("⚠️ Let's check your speaking:")
+
+        st.markdown(f"**What you said:** {res['transcript']}")
+
+        if res["correct"]:
+            st.markdown("**Correct grammar:**")
+            for c_item in res["correct"]:
+                st.markdown(f"- ✅ {c_item}")
+
+        if res["mistakes"]:
+            st.markdown("**Mistakes to fix:**")
+            for m_item in res["mistakes"]:
+                st.markdown(f"- ❌ {m_item}")
+
+        if res["better"]:
+            st.markdown("**Better way to say it:**")
+            for b_item in res["better"]:
+                st.markdown(f"- 💡 {b_item}")
 
     prev_col, next_col = st.columns(2)
     with prev_col:
