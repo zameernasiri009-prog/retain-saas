@@ -10,43 +10,48 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# CLEAN MODERN STYLING
+# CLEAN MODERN STYLING (HIGH-CONTRAST WHITE TEXT ON DARK CARDS)
 # ---------------------------------------------------------------------------
 st.markdown(
     """
     <style>
         .main-banner {
-            background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
+            background: linear-gradient(135deg, #0B1120 0%, #1E3A8A 100%);
             padding: 20px 24px;
             border-radius: 12px;
-            color: #FFFFFF;
+            color: #FFFFFF !important;
             margin-bottom: 18px;
             border-bottom: 4px solid #F59E0B;
         }
-        .main-banner h1 {
+        .main-banner h1, .main-banner p {
             margin: 0;
+            color: #FFFFFF !important;
+        }
+        .main-banner h1 {
             font-size: 22px;
-            color: #FFFFFF;
             font-weight: 700;
         }
         .main-banner p {
-            margin: 6px 0 0 0;
+            margin-top: 6px;
             font-size: 13px;
-            color: #E2E8F0;
+            color: #F8FAFC !important;
         }
         .step-card {
-            background: #FFFFFF;
-            border: 1px solid #E2E8F0;
-            border-left: 5px solid #1E3A8A;
+            background: #111827;
+            border: 1px solid #334155;
+            border-left: 5px solid #38BDF8;
             border-radius: 10px;
             padding: 18px 20px;
             margin: 12px 0 16px 0;
-            box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
+            color: #FFFFFF !important;
+        }
+        .step-card * {
+            color: #FFFFFF !important;
         }
         .q-badge {
             display: inline-block;
-            background: #EFF6FF;
-            color: #1E3A8A;
+            background: #1D4ED8;
+            color: #FFFFFF !important;
             font-weight: 700;
             font-size: 12px;
             padding: 4px 10px;
@@ -56,25 +61,33 @@ st.markdown(
         .q-prompt {
             font-size: 18px;
             font-weight: 600;
-            color: #0F172A;
+            color: #FFFFFF !important;
             margin: 6px 0 12px 0;
             line-height: 1.45;
         }
         .tutor-box {
-            background: #F8FAFC;
-            border: 1px solid #CBD5E1;
-            border-left: 5px solid #0F766E;
+            background: #0F172A;
+            border: 1px solid #2DD4BF;
+            border-left: 5px solid #14B8A6;
             border-radius: 10px;
             padding: 14px 18px;
             margin-top: 12px;
+            color: #FFFFFF !important;
+        }
+        .tutor-box *, .tutor-box p, .tutor-box li, .tutor-box strong, .tutor-box code {
+            color: #FFFFFF !important;
         }
         .speak-card {
-            background: #FFFBEB;
-            border: 1px solid #FDE68A;
-            border-left: 5px solid #D97706;
+            background: #1E1B4B;
+            border: 1px solid #F59E0B;
+            border-left: 5px solid #F59E0B;
             border-radius: 10px;
             padding: 16px 20px;
             margin: 12px 0;
+            color: #FFFFFF !important;
+        }
+        .speak-card *, .speak-card p, .speak-card strong {
+            color: #FFFFFF !important;
         }
     </style>
     """,
@@ -269,13 +282,13 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
     <div style="margin: 6px 0 10px 0;">
         <button id="btn_{key_id}" onclick="speakNow_{key_id}()"
             style="
-                background: #1E3A8A;
+                background: #2563EB;
                 color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
                 padding: 9px 16px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
                 cursor: pointer;
                 display: inline-flex;
                 align-items: center;
@@ -283,7 +296,7 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
             ">
             {label}
         </button>
-        <span id="status_{key_id}" style="margin-left: 10px; font-size: 13px; color: #475569;"></span>
+        <span id="status_{key_id}" style="margin-left: 10px; font-size: 13px; color: #FFFFFF; font-weight: 500;"></span>
     </div>
     <script>
         function speakNow_{key_id}() {{
@@ -313,15 +326,16 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
 def voice_speaker_widget(item_idx: int):
     html = f"""
     <div style="
-        background: #F1F5F9;
-        border: 1px solid #CBD5E1;
+        background: #111827;
+        border: 1px solid #475569;
         border-radius: 10px;
         padding: 12px 14px;
         margin: 8px 0 10px 0;
+        color: #FFFFFF;
     ">
         <button type="button" onclick="startMic_{item_idx}()"
             style="
-                background: #B91C1C;
+                background: #DC2626;
                 color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
@@ -332,14 +346,14 @@ def voice_speaker_widget(item_idx: int):
             ">
             🎙️ Press &amp; Speak
         </button>
-        <span id="mic_state_{item_idx}" style="margin-left: 10px; font-size: 13px; color: #334155;">
+        <span id="mic_state_{item_idx}" style="margin-left: 10px; font-size: 13px; color: #FFFFFF;">
             Tap to speak your 3 sentences
         </span>
         <div id="live_speech_{item_idx}" style="
             margin-top: 8px;
             font-size: 14px;
             font-weight: 600;
-            color: #0F172A;
+            color: #FFFFFF;
         "></div>
     </div>
     <script>
