@@ -53,15 +53,6 @@ st.markdown(
             margin: 6px 0 12px 0;
             line-height: 1.45;
         }
-        .sp-sync-wrap {
-            position: fixed;
-            left: -9999px;
-            top: 0;
-            width: 1px;
-            height: 1px;
-            overflow: hidden;
-            opacity: 0;
-        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -464,7 +455,7 @@ def submit_bridge_button(item_no: int, key_id: str):
                 style="background:#E11D48;color:#FFFFFF;border:none;padding:9px 20px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
                 Submit
             </button>
-            <span id="sub_status_{safe_id}" style="color:#FBBF24;font-size:13px;font-weight:600;"></span>
+            <span id="sub_status_{safe_id}" style="color:#4ADE80;font-size:13px;font-weight:600;"></span>
         </div>
         <script>
         function doSubmit_{safe_id}() {{
@@ -475,26 +466,20 @@ def submit_bridge_button(item_no: int, key_id: str):
                     rec = window.top.__spAudioStore[{item_no}] || null;
                 }}
             }} catch (e) {{}}
-            const hasRec = rec && (rec.recorded || rec.base64) ? true : false;
-            const tx = rec && rec.transcript ? String(rec.transcript).slice(0, 800) : "";
-            statusEl.textContent = "Checking...";
+            const tx = rec && rec.transcript ? String(rec.transcript).slice(0, 250) : "";
+            const hasRec = rec && (rec.recorded || rec.base64) ? "1" : "0";
+            statusEl.textContent = "Reviewing...";
             try {{
-                const doc = window.top ? window.top.document : document;
-                const inputs = Array.from(doc.querySelectorAll("input[type='text']"));
-                const targetInput = inputs.find(el => el.getAttribute("aria-label") === "__sp_submit_payload__");
-                if (targetInput) {{
-                    const valObj = {{
-                        item: {item_no},
-                        hasRec: hasRec,
-                        transcript: tx,
-                        ts: Date.now()
-                    }};
-                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                    nativeSetter.call(targetInput, JSON.stringify(valObj));
-                    targetInput.dispatchEvent(new Event("input", {{ bubbles: true }}));
-                    targetInput.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                }}
-            }} catch (e) {{}}
+                const targetWin = window.top || window;
+                const url = new URL(targetWin.location.href);
+                url.searchParams.set("sp_item", String({item_no}));
+                url.searchParams.set("sp_rec", hasRec);
+                url.searchParams.set("sp_tx", tx);
+                url.searchParams.set("sp_ts", String(Date.now()));
+                targetWin.location.assign(url.toString());
+            }} catch (e) {{
+                statusEl.textContent = "Please record with Mic first, then tap Submit.";
+            }}
         }}
         </script>
         """,
@@ -672,9 +657,36 @@ if "sp_index" not in st.session_state:
 if "sp_results" not in st.session_state:
     st.session_state.sp_results = {}
 if "last_sp_ts" not in st.session_state:
-    st.session_state.last_sp_ts = 0
+    st.session_state.last_sp_ts = ""
 
 api_key = get_api_key()
+
+sp_item_param = st.query_params.get("sp_item")
+sp_ts_param = st.query_params.get("sp_ts", "")
+if sp_item_param and sp_ts_param and sp_ts_param != st.session_state.last_sp_ts:
+    try:
+        sub_item = int(sp_item_param)
+        has_rec = st.query_params.get("sp_rec", "0") == "1"
+        sub_tx = st.query_params.get("sp_tx", "") or ""
+        q_lookup = dict(SPEAKING_15_ITEMS).get(sub_item, [])
+        st.session_state.last_sp_ts = sp_ts_param
+        if 1 <= sub_item <= 15:
+            st.session_state.sp_index = sub_item - 1
+            st.session_state.sp_results[sub_item] = ai_check_speaking(
+                q_lookup,
+                sub_tx,
+                has_rec,
+                api_key,
+            )
+    except Exception:
+        pass
+    finally:
+        for k in ("sp_item", "sp_rec", "sp_tx", "sp_ts"):
+            try:
+                if k in st.query_params:
+                    del st.query_params[k]
+            except Exception:
+                pass
 
 st.markdown(
     """
@@ -760,31 +772,6 @@ else:
     listen_button(three_qs, key_id=f"spk_set_{item_no}")
     mic_recorder(key_id=f"mic_set_{item_no}", item_no=item_no)
     submit_bridge_button(item_no=item_no, key_id=f"submit_set_{item_no}")
-
-    st.markdown('<div class="sp-sync-wrap">', unsafe_allow_html=True)
-    bridge_raw = st.text_input(
-        "__sp_submit_payload__",
-        key=f"sp_submit_bridge_{item_no}",
-        label_visibility="collapsed",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if bridge_raw and bridge_raw.startswith("{"):
-        try:
-            sub_obj = json.loads(bridge_raw)
-            sub_ts = int(sub_obj.get("ts", 0) or 0)
-            if int(sub_obj.get("item", 0)) == item_no and sub_ts != st.session_state.last_sp_ts:
-                st.session_state.last_sp_ts = sub_ts
-                has_rec = bool(sub_obj.get("hasRec", False))
-                sub_tx = str(sub_obj.get("transcript") or "")
-                st.session_state.sp_results[item_no] = ai_check_speaking(
-                    three_qs,
-                    sub_tx,
-                    has_rec,
-                    api_key,
-                )
-        except Exception:
-            pass
 
     res = st.session_state.sp_results.get(item_no)
     if res:
