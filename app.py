@@ -321,77 +321,166 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
 
 
 # ---------------------------------------------------------------------------
-# ONE-TAP SPEAKER / VOICE INPUT WIDGET FOR SPEAKING PART
+# AUTO-GRADING AI TUTOR FOR SPOKEN ANSWERS (VOICE ONLY, NO TEXT BOX)
 # ---------------------------------------------------------------------------
-def voice_speaker_widget(item_idx: int):
+def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
+    q_json = json.dumps(questions_3)
+    existing = st.session_state.speak_feedback.get(item_no)
+    initial_json = json.dumps(existing) if existing else "null"
+
     html = f"""
     <div style="
         background: #111827;
         border: 1px solid #475569;
         border-radius: 10px;
-        padding: 12px 14px;
-        margin: 8px 0 10px 0;
+        padding: 14px 16px;
+        margin: 8px 0 12px 0;
         color: #FFFFFF;
     ">
-        <button type="button" onclick="startMic_{item_idx}()"
+        <button type="button" id="mic_btn_{item_no}" onclick="recordAndGrade_{item_no}()"
             style="
                 background: #DC2626;
                 color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
-                padding: 10px 18px;
-                font-size: 14px;
+                padding: 11px 20px;
+                font-size: 15px;
                 font-weight: 700;
                 cursor: pointer;
             ">
-            🎙️ Press &amp; Speak
+            🎙️ Press &amp; Speak (Auto-AI Grade)
         </button>
-        <span id="mic_state_{item_idx}" style="margin-left: 10px; font-size: 13px; color: #FFFFFF;">
-            Tap to speak your 3 sentences
+        <span id="mic_status_{item_no}" style="margin-left: 12px; font-size: 13px; color: #FFFFFF; font-weight: 500;">
+            Tap and speak your 3 sentences
         </span>
-        <div id="live_speech_{item_idx}" style="
-            margin-top: 8px;
-            font-size: 14px;
-            font-weight: 600;
+        <div id="ai_result_{item_no}" style="
+            margin-top: 12px;
+            background: #0F172A;
+            border: 1px solid #2DD4BF;
+            border-radius: 8px;
+            padding: 12px 14px;
             color: #FFFFFF;
+            font-size: 14px;
+            line-height: 1.5;
         "></div>
     </div>
     <script>
-        function startMic_{item_idx}() {{
+        const prompts_{item_no} = {q_json};
+
+        function localAIGrade_{item_no}(spokenText) {{
+            const clean = (spokenText || "").replace(/\\s+/g, " ").trim();
+            const words = clean.match(/[A-Za-z']+/g) || [];
+            const parts = clean.split(/[.!?]+|\\band\\b|\\bbut\\b|\\bso\\b/i).map(s => s.trim()).filter(s => s.split(/\\s+/).length >= 2);
+            const sentCount = Math.max(clean.split(/[.!?]+/).filter(s => s.trim()).length, parts.length);
+            const lower = clean.toLowerCase();
+
+            const issues = [];
+            const good = [];
+
+            if (words.length < 4) {{
+                issues.push("Too short to grade clearly. Speak full sentences for all 3 questions.");
+            }} else {{
+                good.push("Spoken clearly (" + words.length + " words captured).");
+            }}
+
+            if (sentCount >= 3) {{
+                good.push("Answered with " + sentCount + " sentence parts across the 3 questions.");
+            }} else {{
+                issues.append("Detected " + sentCount + " sentence part(s) — speak 3 complete sentences (1 per question).");
+            }}
+
+            if (/\\b(he|she|it)\\s+(have|do|go|like|work|live|eat)\\b/.test(lower)) {{
+                issues.push("Use 3rd-person singular verbs with he/she/it (has, does, goes, likes, works, lives, eats).");
+            }}
+            if (/\\b(i|we|they|you)\\s+(has|does|goes)\\b/.test(lower)) {{
+                issues.append("Use base verbs with I/we/they/you (have, do, go).");
+            }}
+            if (/\\ba\\s+(apple|egg|orange|umbrella|old)\\b/.test(lower)) {{
+                issues.append("Use 'an' before a vowel sound.");
+            }}
+
+            if (issues.length === 0) {{
+                good.push("Grammar and structure look strong for beginner speaking.");
+            }}
+
+            const isCorrect = (words.length >= 5) && (sentCount >= 3) && (issues.length === 0);
+            return {{
+                transcript: clean,
+                isCorrect: isCorrect,
+                good: good.join(" "),
+                problems: issues.length ? issues.join(" ") : "No mistakes found — this speaking response is CORRECT."
+            }};
+        }}
+
+        function renderGradeBox_{item_no}(res) {{
+            const box = document.getElementById("ai_result_{item_no}");
+            if (!res) {{
+                box.innerHTML = "<span style='color:#E2E8F0;'>Waiting for your voice... Once you finish speaking, AI grades it automatically.</span>";
+                return;
+            }}
+            const verdictBadge = res.isCorrect
+                ? "<span style='background:#15803D;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;'>✓ CORRECT</span>"
+                : "<span style='background:#B91C1C;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;'>✗ NOT CORRECT</span>";
+
+            const saidText = res.transcript ? res.transcript : "(nothing detected)";
+            box.innerHTML = `
+                <div style="margin-bottom:6px;"><strong>AI Result:</strong> ${verdictBadge}</div>
+                <div><strong>You Said:</strong> ${saidText}</div>
+                <div style="margin-top:6px;"><strong>Good:</strong> ${res.good}</div>
+                <div style="margin-top:4px;"><strong>Feedback / Mistakes:</strong> ${res.problems}</div>
+            `;
+        }}
+
+        renderGradeBox_{item_no}({initial_json});
+
+        function recordAndGrade_{item_no}() {{
             const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const stateEl = document.getElementById("mic_state_{item_idx}");
-            const outEl = document.getElementById("live_speech_{item_idx}");
+            const statusEl = document.getElementById("mic_status_{item_no}");
             if (!SpeechRec) {{
-                stateEl.innerText = "Voice mic not supported in this browser—use the text box below.";
+                statusEl.innerText = "Speech recognition is not available in this browser.";
                 return;
             }}
             const rec = new SpeechRec();
             rec.lang = "en-US";
             rec.interimResults = true;
-            rec.continuous = false;
-            stateEl.innerText = "Listening... speak clearly now.";
+            rec.continuous = true;
+            let finalTranscript = "";
+            let silenceTimer = null;
+
+            statusEl.innerText = "Listening... speak your 3 sentences, then pause briefly to auto-grade.";
+
             rec.onresult = (event) => {{
-                let transcript = "";
+                let full = "";
                 for (let i = 0; i < event.results.length; i++) {{
-                    transcript += event.results[i][0].transcript + " ";
+                    full += event.results[i][0].transcript + " ";
                 }}
-                outEl.innerText = "Heard: " + transcript.trim();
+                finalTranscript = full.trim();
+                clearTimeout(silenceTimer);
+                silenceTimer = setTimeout(() => {{
+                    try {{ rec.stop(); }} catch (e) {{}}
+                }}, 1800);
             }};
+
             rec.onerror = (e) => {{
-                stateEl.innerText = "Mic notice: " + e.error + " (you can also type below).";
+                statusEl.innerText = "Mic error: " + e.error + ". Tap again to retry.";
             }};
+
             rec.onend = () => {{
-                stateEl.innerText = "Done listening. Copy/paste or edit below if needed, then tap Get AI Tutor Feedback.";
+                clearTimeout(silenceTimer);
+                const graded = localAIGrade_{item_no}(finalTranscript);
+                renderGradeBox_{item_no}(graded);
+                statusEl.innerText = "Auto-graded by AI.";
             }};
+
             rec.start();
         }}
     </script>
     """
-    components.html(html, height=105)
+    components.html(html, height=215)
 
 
 # ---------------------------------------------------------------------------
-# GUARANTEED INSTANT AI TUTOR FEEDBACK (NO SETUP REQUIRED)
+# GRAMMAR BACKEND CHECKER & AI TUTOR
 # ---------------------------------------------------------------------------
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
@@ -404,7 +493,7 @@ def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> st
         return (
             f"**AI Tutor Feedback — Great job!**\n"
             f"- **Why it works:** {q['rule']}\n"
-            f"- **Next step:** Say the full sentence aloud using the **Pronunciation** button to lock in the rhythm."
+            f"- **Next step:** Tap **Pronunciation** and say the full sentence out loud."
         )
 
     expected = q.get("answer") or q.get("correct", "")
@@ -420,51 +509,6 @@ def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> st
     tips.append(f"- **Correct target:** **{expected}**")
     tips.append(f"- **Grammar rule:** {q['rule']}")
     return "\n".join(tips)
-
-
-def speaking_ai_tutor_feedback(questions_3: list[str], response_text: str) -> str:
-    clean = response_text.strip()
-    if not clean:
-        return (
-            "**AI Tutor Feedback:**\n"
-            "- **Problem:** No spoken sentences detected yet.\n"
-            "- **Action:** Press **Press & Speak** (or type 3 sentences below) to answer all 3 questions, one sentence per question."
-        )
-
-    sentences = [s.strip() for s in re.split(r"[.!?]+|\n+", clean) if s.strip()]
-    count = len(sentences)
-
-    good_points = []
-    problems = []
-
-    if count >= 3:
-        good_points.append(f"You gave **{count} sentences**, meeting the 3-sentence requirement.")
-    else:
-        problems.append(
-            f"You only gave **{count}** sentence(s). Answer all **3 questions** with **3 separate sentences** (1 sentence for each question)."
-        )
-
-    if re.search(r"\bi\b", clean):
-        problems.append("Use capital **I** instead of lowercase `i`.")
-    else:
-        good_points.append("Clean pronoun capitalization.")
-
-    if len(clean.split()) >= 6:
-        good_points.append("Good attempt at full-sentence communication.")
-    else:
-        problems.append("Your response is very short—try answering each of the 3 questions in a full sentence.")
-
-    if not good_points:
-        good_points.append("You made an effort to answer the prompt.")
-    if not problems:
-        problems.append("No major beginner grammar issues spotted—focus on smooth pronunciation and natural intonation.")
-
-    return (
-        "**AI Tutor Evaluation:**\n"
-        "- **Good:** " + " ".join(good_points) + "\n"
-        "- **Your Problems:** " + " ".join(problems) + "\n"
-        f"- **Prompts to Cover:** {questions_3[0]} | {questions_3[1]} | {questions_3[2]}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +533,7 @@ st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>Step-by-Step Grammar (10 MCQ + 5 Sentence Patterns) &amp; 15-Item Speaking Coach</p>
+        <p>Step-by-Step Grammar (10 MCQ + 5 Sentence Patterns) &amp; Voice-Graded Speaking</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -579,7 +623,7 @@ if section.startswith("1."):
 
 
 # ---------------------------------------------------------------------------
-# PART 2: SPEAKING PRACTICE (15 ITEMS × 3 QUESTIONS)
+# PART 2: SPEAKING PRACTICE (15 ITEMS × 3 QUESTIONS — VOICE ONLY + AUTO AI GRADE)
 # ---------------------------------------------------------------------------
 else:
     s_idx = st.session_state.speak_index
@@ -588,7 +632,7 @@ else:
     st.progress((s_idx + 1) / len(SPEAKING_15_ITEMS), text=f"Speaking Set {item_no} of {len(SPEAKING_15_ITEMS)}")
 
     st.markdown('<div class="speak-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions (Answer with 3 Sentences)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions (Speak 3 Sentences)</div>', unsafe_allow_html=True)
     st.markdown(
         f"1. **{three_qs[0]}**<br/>"
         f"2. **{three_qs[1]}**<br/>"
@@ -598,22 +642,7 @@ else:
     st.markdown("</div>", unsafe_allow_html=True)
 
     pronounce_button(" ".join(three_qs), label="🔊 Listen Questions", key_id=f"sp_{item_no}")
-    voice_speaker_widget(item_no)
-
-    spoken_or_typed = st.text_area(
-        "Your 3 spoken/written sentences (1 sentence for each of the 3 questions):",
-        height=110,
-        placeholder="Sentence 1...\nSentence 2...\nSentence 3...",
-        key=f"sp_input_{item_no}",
-    )
-
-    if st.button("🤖 Get AI Tutor Feedback", type="primary", key=f"sp_eval_{item_no}"):
-        st.session_state.speak_feedback[item_no] = speaking_ai_tutor_feedback(three_qs, spoken_or_typed)
-
-    if item_no in st.session_state.speak_feedback:
-        st.markdown('<div class="tutor-box">', unsafe_allow_html=True)
-        st.markdown(st.session_state.speak_feedback[item_no])
-        st.markdown("</div>", unsafe_allow_html=True)
+    voice_auto_grade_widget(item_no, three_qs)
 
     c1, c2 = st.columns(2)
     with c1:
