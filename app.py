@@ -409,7 +409,7 @@ def submit_bridge_button(item_no: int, key_id: str):
             <span id="sub_msg_{safe_id}" style="margin-left:10px;color:#FBBF24;font-size:13px;font-weight:600;"></span>
         </div>
         <script>
-        function doSubmit_{safe_id}() {{
+        async function doSubmit_{safe_id}() {{
             const msgEl = document.getElementById("sub_msg_{safe_id}");
             let rec = null;
             try {{
@@ -421,12 +421,20 @@ def submit_bridge_button(item_no: int, key_id: str):
                 msgEl.textContent = "Please record your voice with Mic first.";
                 return;
             }}
-            msgEl.textContent = "Sending to AI...";
-            const payloadStr = JSON.stringify({{ item: {item_no}, base64: rec.base64, mime: rec.mime, name: rec.name }});
-            const b64Payload = btoa(unescape(encodeURIComponent(payloadStr)));
-            const url = new URL(window.top.location.href);
-            url.searchParams.set("sp_sub", b64Payload);
-            window.top.location.assign(url.toString());
+            msgEl.textContent = "Checking voice...";
+            try {{
+                const doc = window.top ? window.top.document : document;
+                const inputs = Array.from(doc.querySelectorAll("input[type='text']"));
+                const targetInput = inputs.find(el => el.getAttribute("aria-label") === "__sp_audio_bridge__");
+                if (targetInput) {{
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                    nativeSetter.call(targetInput, JSON.stringify({{ item: {item_no}, base64: rec.base64, mime: rec.mime, name: rec.name }}));
+                    targetInput.dispatchEvent(new Event("input", {{ bubbles: true }}));
+                    targetInput.dispatchEvent(new Event("change", {{ bubbles: true }}));
+                }}
+            }} catch (e) {{
+                msgEl.textContent = "Could not send audio.";
+            }}
         }}
         </script>
         """,
@@ -552,34 +560,6 @@ if "sp_results" not in st.session_state:
 
 api_key = get_api_key()
 
-sp_sub_param = st.query_params.get("sp_sub")
-if sp_sub_param:
-    try:
-        decoded_json = base64.b64decode(sp_sub_param).decode("utf-8")
-        sub_obj = json.loads(decoded_json)
-        sub_item = int(sub_obj.get("item", 0))
-        sub_b64 = sub_obj.get("base64", "")
-        sub_mime = sub_obj.get("mime") or "audio/webm"
-        sub_name = sub_obj.get("name") or "recording.webm"
-        q_lookup = dict(SPEAKING_15_ITEMS).get(sub_item, [])
-        if sub_item and sub_b64:
-            raw_bytes = base64.b64decode(sub_b64)
-            with st.spinner("AI is checking your voice..."):
-                st.session_state.sp_results[sub_item] = ai_check_speaking(
-                    q_lookup,
-                    raw_bytes,
-                    sub_mime,
-                    sub_name,
-                    api_key,
-                )
-    except Exception:
-        pass
-    finally:
-        try:
-            del st.query_params["sp_sub"]
-        except Exception:
-            pass
-
 st.markdown(
     """
     <div class="main-banner">
@@ -664,6 +644,29 @@ else:
     listen_button(three_qs, key_id=f"spk_set_{item_no}")
     mic_recorder(key_id=f"mic_set_{item_no}", item_no=item_no)
     submit_bridge_button(item_no=item_no, key_id=f"submit_set_{item_no}")
+
+    bridge_raw = st.text_input(
+        "__sp_audio_bridge__",
+        key=f"sp_bridge_input_{item_no}",
+        label_visibility="collapsed",
+    )
+    if bridge_raw and bridge_raw.startswith("{"):
+        try:
+            sub_obj = json.loads(bridge_raw)
+            if int(sub_obj.get("item", 0)) == item_no and sub_obj.get("base64"):
+                raw_bytes = base64.b64decode(sub_obj["base64"])
+                mime = sub_obj.get("mime") or "audio/webm"
+                fname = sub_obj.get("name") or "recording.webm"
+                with st.spinner("AI is checking your voice..."):
+                    st.session_state.sp_results[item_no] = ai_check_speaking(
+                        three_qs,
+                        raw_bytes,
+                        mime,
+                        fname,
+                        api_key,
+                    )
+        except Exception:
+            pass
 
     res = st.session_state.sp_results.get(item_no)
     if res:
