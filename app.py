@@ -4,7 +4,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="English Learning Interactive Quiz",
+    page_title="English Learning Interactive Quiz & Speaking Grader",
     page_icon="🎓",
     layout="centered",
 )
@@ -86,6 +86,17 @@ st.markdown(
         .speak-card *, .speak-card p, .speak-card strong {
             color: #FFFFFF !important;
         }
+        .grade-box {
+            background: #0F172A;
+            border: 1px solid #2DD4BF;
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-top: 12px;
+            color: #FFFFFF !important;
+        }
+        .grade-box * {
+            color: #FFFFFF !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -99,25 +110,25 @@ MCQ_QUESTIONS = [
         "pronounce": "You are in class two, and is she from Turkey?",
         "options": ["A) are / is", "B) am / are", "C) is / am"],
         "answer": "A) are / is",
-        "rule": "Use are with you and is with third-person singular she.",
+        "rule": "Use 'are' with 'you' and 'is' with third-person singular 'she'.",
     },
     {
         "num": 2,
         "type": "Multiple Choice",
-        "prompt": "\"___ is she?\" — \"She's ten.\" And \"___'s he from?\"",
+        "prompt": '"___ is she?\" — \"She\'s ten.\" And \"___\'s he from?\"',
         "pronounce": "How old is she? She is ten. And where is he from?",
         "options": ["A) Where / How old", "B) How old / Where", "C) Who / When"],
         "answer": "B) How old / Where",
-        "rule": "How old asks about age, while Where asks about origin or place.",
+        "rule": "'How old' asks about age, while 'Where' asks about origin or place.",
     },
     {
         "num": 3,
         "type": "Multiple Choice",
-        "prompt": "\"Are they Mexican?\" — \"No, they ___.\" And \"We ___ from Canada.\"",
+        "prompt": '"Are they Mexican?\" — \"No, they ___.\" And \"We ___ from Canada.\"',
         "pronounce": "Are they Mexican? No, they are not. And we are from Canada.",
         "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
-        "rule": "Plural subjects they and we use aren't and 're (are) with the verb be.",
+        "rule": "Plural subjects 'they' and 'we' use 'aren't' and 're (are) with the verb 'be'.",
     },
     {
         "num": 4,
@@ -126,7 +137,7 @@ MCQ_QUESTIONS = [
         "pronounce": "How old is she?",
         "options": ["A) How old's she?", "B) Where's he?", "C) How old is she?"],
         "answer": "C) How old is she?",
-        "rule": "How old is she? is the standard full form.",
+        "rule": "'How old is she?' is the standard full form.",
     },
     {
         "num": 5,
@@ -135,16 +146,16 @@ MCQ_QUESTIONS = [
         "pronounce": "I have an umbrella, a key, and two keys.",
         "options": ["A) an / a / keys", "B) a / an / keyes", "C) an / an / key"],
         "answer": "A) an / a / keys",
-        "rule": "Use an before a vowel sound (umbrella), a before a consonant sound (key), and plural keys.",
+        "rule": "Use 'an' before a vowel sound ('umbrella'), 'a' before a consonant sound ('key'), and plural 'keys'.",
     },
     {
         "num": 6,
         "type": "Multiple Choice",
-        "prompt": "\"What are ___ right here?\" — \"They're keys.\" And \"Who are ___ girls over there?\"",
+        "prompt": '"What are ___ right here?\" — \"They\'re keys.\" And \"Who are ___ girls over there?\"',
         "pronounce": "What are these right here? They are keys. And who are those girls over there?",
         "options": ["A) that / this", "B) these / those", "C) this / that"],
         "answer": "B) these / those",
-        "rule": "These refers to plural things close by, and those refers to plural people or things farther away.",
+        "rule": "'These' refers to plural things close by, and 'those' refers to plural people or things farther away.",
     },
     {
         "num": 7,
@@ -153,7 +164,7 @@ MCQ_QUESTIONS = [
         "pronounce": "This is my parents house, and Senegal is in Africa. Its flag is red, yellow, and green.",
         "options": ["A) parents' / Its", "B) parent's / It's", "C) parents's / Their"],
         "answer": "A) parents' / Its",
-        "rule": "Plural possessive ends with an apostrophe after s (parents'), and possessive Its has no apostrophe.",
+        "rule": "Plural possessive ends with an apostrophe after s ('parents''), and possessive 'Its' has no apostrophe.",
     },
     {
         "num": 8,
@@ -166,16 +177,16 @@ MCQ_QUESTIONS = [
             "C) An Audi expensive is and she's talls.",
         ],
         "answer": "B) It's a fast car and my glasses are new.",
-        "rule": "English adjectives never take plural -s and go before nouns or after be.",
+        "rule": "English adjectives never take plural '-s' and go before nouns or after 'be'.",
     },
     {
         "num": 9,
         "type": "Multiple Choice",
-        "prompt": "\"___ you live near here?\" — \"No, I ___.\" And \"We ___ have meat for dinner.\"",
+        "prompt": '"___ you live near here?\" — \"No, I ___.\" And \"We ___ have meat for dinner.\"',
         "pronounce": "Do you live near here? No, I do not. And we do not have meat for dinner.",
         "options": ["A) Do / don't / don't", "B) Does / doesn't / aren't", "C) Are / 'm not / not"],
         "answer": "A) Do / don't / don't",
-        "rule": "Use Do and don't with you and we in present simple questions and negatives.",
+        "rule": "Use 'Do' and 'don't' with 'you' and 'we' in present simple questions and negatives.",
     },
     {
         "num": 10,
@@ -184,7 +195,7 @@ MCQ_QUESTIONS = [
         "pronounce": "She watches TV in the evening, and he never eats meat.",
         "options": ["A) watch / doesn't never", "B) watches / never", "C) watching / no"],
         "answer": "B) watches / never",
-        "rule": "Add -es for third-person singular watches, and use never without double negatives.",
+        "rule": "Add '-es' for third-person singular 'watches', and use 'never' without double negatives.",
     },
 ]
 
@@ -196,7 +207,7 @@ REWRITE_QUESTIONS = [
         "pronounce": "Where are you from?",
         "accepted": ["where are you from?", "where are you from"],
         "correct": "Where are you from?",
-        "rule": "Question word (Where) + verb be (are) + subject (you) + preposition (from) + question mark.",
+        "rule": "Question word ('Where') + verb 'be' ('are') + subject ('you') + preposition ('from') + question mark.",
     },
     {
         "num": 12,
@@ -214,7 +225,7 @@ REWRITE_QUESTIONS = [
             "it's a old house",
         ],
         "correct": "It is an old house.",
-        "rule": "Subject (It) + verb (is) + article (an before vowel sound old) + adjective + noun (house).",
+        "rule": "Subject ('It') + verb ('is') + article ('an' before vowel sound 'old') + adjective + noun ('house').",
     },
     {
         "num": 13,
@@ -223,7 +234,7 @@ REWRITE_QUESTIONS = [
         "pronounce": "Do you live near here?",
         "accepted": ["do you live near here?", "do you live near here"],
         "correct": "Do you live near here?",
-        "rule": "Auxiliary Do + subject (you) + base verb (live) + place phrase (near here).",
+        "rule": "Auxiliary 'Do' + subject ('you') + base verb ('live') + place phrase ('near here').",
     },
     {
         "num": 14,
@@ -232,7 +243,7 @@ REWRITE_QUESTIONS = [
         "pronounce": "Where does he work?",
         "accepted": ["where does he work?", "where does he work"],
         "correct": "Where does he work?",
-        "rule": "Question word (Where) + does + singular subject (he) + base verb (work).",
+        "rule": "Question word ('Where') + 'does' + singular subject ('he') + base verb ('work').",
     },
     {
         "num": 15,
@@ -241,7 +252,7 @@ REWRITE_QUESTIONS = [
         "pronounce": "I always have breakfast.",
         "accepted": ["i always have breakfast.", "i always have breakfast"],
         "correct": "I always have breakfast.",
-        "rule": "Subject (I) + frequency adverb (always) + main verb (have) + object (breakfast).",
+        "rule": "Subject ('I') + frequency adverb ('always') + main verb ('have') + object ('breakfast').",
     },
 ]
 
@@ -265,142 +276,118 @@ SPEAKING_15_ITEMS = [
     (15, ["What do you have for breakfast?", "What don't you have for lunch?", "What don't they have for dinner?"]),
 ]
 
-def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str = "p"):
-    safe_text = json.dumps(text)
-    template = (
-        '<div style="margin: 6px 0 10px 0;">'
-        '<button id="btn___KID__" onclick="speakNow___KID__()" '        'style="background:#2563EB;color:#FFFFFF;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer;">'
-        '__LBL__</button>'
-        '<span id="status___KID__" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>'
-        '</div>'
-        '<script>'
-        'function speakNow___KID__() {'
-        '  const phrase = __TXT__;'
-        '  const stEl = document.getElementById("status___KID__");'
-        '  if ("speechSynthesis" in window) {'
-        '    window.speechSynthesis.cancel();'
-        '    const utter = new SpeechSynthesisUtterance(phrase);'
-        '    utter.lang = "en-US";'
-        '    utter.rate = 0.95;'
-        '    stEl.innerText = "Speaking...";'
-        '    utter.onend = () => { stEl.innerText = ""; };'
-        '    utter.onerror = () => { stEl.innerText = phrase; };'
-        '    window.speechSynthesis.speak(utter);'
-        '  } else { stEl.innerText = phrase; }'
-        '}'
-        '</script>'
-    )
-    html = template.replace("__KID__", key_id).replace("__LBL__", label).replace("__TXT__", safe_text)
-    components.html(html, height=48)
 
-def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
-    q_json = json.dumps(questions_3)
-    existing = st.session_state.speak_feedback.get(item_no)
-    initial_json = json.dumps(existing) if existing else "null"
-    n = str(item_no)
-    parts = [
-        '<div style="background:#111827;border:1px solid #475569;border-radius:10px;padding:14px 16px;margin:8px 0 12px 0;color:#FFFFFF;">',
-        '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">',
-        '<button type="button" id="rec_start_' + n + '" onclick="startAudioRec_' + n + '()" style="background:#DC2626;color:#FFFFFF;border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;">Start Speaking</button>',
-        '<button type="button" id="rec_stop_' + n + '" onclick="stopAndGradeAudio_' + n + '()" style="background:#15803D;color:#FFFFFF;border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;">Done Speaking &amp; AI Grade</button>',
-        '</div>',
-        '<div id="mic_status_' + n + '" style="margin-top:10px;font-size:13px;color:#FFFFFF;font-weight:500;">Tap Start Speaking, speak your 3 sentences, then tap Done Speaking &amp; AI Grade.</div>',
-        '<div id="audio_wrap_' + n + '" style="margin-top:8px;"></div>',
-        '<div id="ai_result_' + n + '" style="margin-top:12px;background:#0F172A;border:1px solid #2DD4BF;border-radius:8px;padding:12px 14px;color:#FFFFFF;font-size:14px;line-height:1.55;"></div>',
-        '</div>',
-        '<script>'
-        'const prompts_' + n + ' = ' + q_json + ';',
-        'let mediaRecorder_' + n + ' = null; let audioChunks_' + n + ' = []; let speechRec_' + n + ' = null;',
-        'let liveTranscript_' + n + ' = ""; let audioBlobSize_' + n + ' = 0; let recStartTime_' + n + ' = 0;',
-        'function strictGrammarAIGrade_' + n + '(transcript, durationSec, blobBytes) {',
-        '  const clean = (transcript || "").replace(/\s+/g, " ").trim();',
-        '  const lower = clean.toLowerCase();',
-        '  const words = clean.match(/[A-Za-z]+/g) || [];',
-        '  const chunks = clean.split(/[.!?]+|\band\b|\bbut\b|\bbecause\b|\bso\b/i).map(s => s.trim()).filter(s => (s.match(/[A-Za-z]+/g) || []).length >= 2);',
-        '  const sentCount = Math.max(clean.split(/[.!?]+/).filter(s => (s.match(/[A-Za-z]+/g) || []).length >= 2).length, chunks.length);',
-        '  const errors = []; const passed = [];',
-        '  if (words.length === 0 && blobBytes <= 0 && durationSec <= 0.1) {',
-        '    return { verdict: false, transcript: "(no voice input recorded yet)", good: "None yet.", mistakes: "Tap Start Speaking, speak your answers, and tap Done Speaking & AI Grade." };',
-        '  }',
-        '  if (words.length < 4 && durationSec < 0.8) { errors.push("Too brief (" + words.length + " word(s) detected). Speak full sentences for all 3 questions."); } else { passed.push("Voice input captured (" + words.length + " word(s), " + durationSec.toFixed(1) + "s)."); }',
-        '  if (sentCount >= 3) { passed.push("Sentence structure coverage met (" + sentCount + " sentence units)."); } else { errors.push("Detected " + sentCount + " sentence unit(s) — speak 3 complete sentences (1 per question)."); }',
-        '  if (/\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study)\b/.test(lower)) { errors.push("Grammar rule: with he/she/it use 3rd-person singular forms (has, does, goes, likes, works, lives, eats, plays, watches, studies)."); }',
-        '  if (/\b(i|we|they|you)\s+(has|does|goes|watches|studies)\b/.test(lower)) { errors.push("Grammar rule: with I/we/they/you use base forms (have, do, go, watch, study)."); }',
-        '  if (/\b(i)\s+(is|are)\b/.test(lower)) { errors.push("Grammar rule: use am with I."); }',
-        '  if (/\b(he|she|it)\s+(am|are)\b/.test(lower)) { errors.push("Grammar rule: use is with he/she/it."); }',
-        '  if (/\b(we|they|you)\s+(am|is)\b/.test(lower)) { errors.push("Grammar rule: use are with we/they/you."); }',
-        '  if (/\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b/.test(lower)) { errors.push("Grammar rule: use an before vowel sounds."); }',
-        '  if (errors.length === 0) { passed.push("Grammar check passed with zero detected errors."); }',
-        '  const gradedPass = (errors.length === 0) && ((words.length >= 4) || (durationSec >= 1.0) || (blobBytes > 0));',
-        '  return { verdict: gradedPass, transcript: clean || "(voice recorded — " + durationSec.toFixed(1) + "s audio captured)", good: passed.length ? passed.join(" ") : "Attempt recorded.", mistakes: errors.length ? errors.join(" ") : "No grammar errors detected — graded CORRECT." };',
-        '}',
-        'function renderStrictGrade_' + n + '(res) {',
-        '  const box = document.getElementById("ai_result_' + n + '");',
-        '  if (!res) { box.innerHTML = "<span style=\"color:#E2E8F0;\">Ready. Tap Start Speaking, speak your 3 sentences, then tap Done Speaking &amp; AI Grade.</span>"; return; }',
-        '  const badge = res.verdict ? "<span style=\"background:#15803D;color:#FFFFFF;padding:3px 10px;border-radius:6px;font-weight:700;\">&#10003; CORRECT</span>" : "<span style=\"background:#B91C1C;color:#FFFFFF;padding:3px 10px;border-radius:6px;font-weight:700;\">&#10007; NOT CORRECT</span>";',
-        '  box.innerHTML = "<div style=\"margin-bottom:6px;\"><strong>AI Grade:</strong> " + badge + "</div>" + "<div><strong>Captured Speech:</strong> " + res.transcript + "</div>" + "<div style=\"margin-top:6px;\"><strong>Good:</strong> " + res.good + "</div>" + "<div style=\"margin-top:4px;\"><strong>Grammar / Feedback:</strong> " + res.mistakes + "</div>";',
-        '}',
-        'renderStrictGrade_' + n + '(' + initial_json + ');',
-        'async function startAudioRec_' + n + '() {',
-        '  const statusEl = document.getElementById("mic_status_' + n + '");',
-        '  audioChunks_' + n + ' = []; liveTranscript_' + n + ' = ""; audioBlobSize_' + n + ' = 0; recStartTime_' + n + ' = Date.now();',
-        '  try {',
-        '    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {',
-        '      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });',
-        '      if (typeof MediaRecorder !== "undefined") {',
-        '        mediaRecorder_' + n + ' = new MediaRecorder(stream);',
-        '        mediaRecorder_' + n + '.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) audioChunks_' + n + '.push(ev.data); };',
-        '        mediaRecorder_' + n + '.onstop = () => {',
-        '          const blob = new Blob(audioChunks_' + n + ', { type: "audio/webm" });',
-        '          audioBlobSize_' + n + ' = blob.size;',
-        '          const url = URL.createObjectURL(blob);',
-        '          document.getElementById("audio_wrap_' + n + '").innerHTML = "<audio controls src=\\"" + url + "\\" style=\\"width:100%;margin-top:6px;\\"></audio>";',
-        '          stream.getTracks().forEach(t => t.stop());',
-        '          const dur = (Date.now() - recStartTime_' + n + ') / 1000.0;',
-        '          const graded = strictGrammarAIGrade_' + n + '(liveTranscript_' + n + ', dur, audioBlobSize_' + n + ');',
-        '          renderStrictGrade_' + n + '(graded);',
-        '        };',
-        '        mediaRecorder_' + n + '.start();',
-        '      }',
-        '    }',
-        '  } catch (err) { statusEl.innerText = "Mic permission status (" + err.name + ") — tap Done Speaking & AI Grade when finished."; }',
-        '  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;',
-        '  if (SpeechRec) {',
-        '    speechRec_' + n + ' = new SpeechRec(); speechRec_' + n + '.lang = "en-US"; speechRec_' + n + '.interimResults = true; speechRec_' + n + '.continuous = true;',
-        '    speechRec_' + n + '.onresult = (event) => {',
-        '      let txt = ""; for (let i = 0; i < event.results.length; i++) { txt += event.results[i][0].transcript + " "; }',
-        '      liveTranscript_' + n + ' = txt.trim(); statusEl.innerText = "Recording... Heard: " + liveTranscript_' + n + ';"',
-        '    };',
-        '    try { speechRec_' + n + '.start(); } catch (e) {}',
-        '  }',
-        '  statusEl.innerText = "Recording voice now... speak your 3 answers, then tap Done Speaking & AI Grade.";',
-        '}',
-        'function stopAndGradeAudio_' + n + '() {',
-        '  const statusEl = document.getElementById("mic_status_' + n + '");',
-        '  if (speechRec_' + n + ') { try { speechRec_' + n + '.stop(); } catch (e) {} }',
-        '  if (mediaRecorder_' + n + ' && mediaRecorder_' + n + '.state !== "inactive") {',
-        '    mediaRecorder_' + n + '.stop(); statusEl.innerText = "Recording stopped — AI grammar grading complete.";',
-        '  } else {',
-        '    const dur = recStartTime_' + n + ' ? (Date.now() - recStartTime_' + n + ') / 1000.0 : 1.0;',
-        '    const graded = strictGrammarAIGrade_' + n + '(liveTranscript_' + n + ', dur, audioBlobSize_' + n + ');',
-        '    renderStrictGrade_' + n + '(graded); statusEl.innerText = "AI grammar grading complete.";',
-        '  }',
-        '}',
-        '</script>',
-    ]
-    components.html(''.join(parts), height=270)
+def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
+    payload = json.dumps(text)
+    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    components.html(
+        f"""
+        <button type="button" id="btn_{safe_id}" onclick="say_{safe_id}()"
+            style="background:#2563EB;color:#FFFFFF;border:none;padding:9px 16px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
+            {label}
+        </button>
+        <span id="spk_out_{safe_id}" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>
+        <script>
+        function say_{safe_id}() {{
+            const t = {payload};
+            const out = document.getElementById("spk_out_{safe_id}");
+            if ("speechSynthesis" in window) {{
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(t);
+                u.lang = "en-US";
+                u.rate = 0.95;
+                out.textContent = "Speaking...";
+                u.onend = () => {{ out.textContent = ""; }};
+                u.onerror = () => {{ out.textContent = t; }};
+                window.speechSynthesis.speak(u);
+            }} else {{
+                out.textContent = t;
+            }}
+        }}
+        </script>
+        """,
+        height=48,
+    )
+
+
+def grade_speaking_response(spoken_text: str, has_audio: bool, audio_bytes_len: int) -> dict:
+    clean = re.sub(r"\s+", " ", (spoken_text or "").strip())
+    lower = clean.lower()
+    words = re.findall(r"[A-Za-z']+", clean)
+
+    punct_sentences = [s.strip() for s in re.split(r"[.!?]+", clean) if len(re.findall(r"[A-Za-z']+", s)) >= 2]
+    clause_parts = [c.strip() for c in re.split(r"\b(?:and|but|because|so)\b", clean, flags=re.I) if len(re.findall(r"[A-Za-z']+", c)) >= 2]
+    sentence_units = max(len(punct_sentences), len(clause_parts))
+
+    errors = []
+    good = []
+
+    if has_audio:
+        good.append(f"Voice recorded ({audio_bytes_len:,} bytes).")
+    else:
+        errors.append("No voice recording attached yet. Tap Record Voice above.")
+
+    if len(words) >= 3:
+        good.append(f"Spoken response captured ({len(words)} words).")
+    else:
+        errors.append("Enter or dictate your spoken sentences so grammar can be checked.")
+
+    if sentence_units >= 3:
+        good.append(f"Answered with {sentence_units} sentence units (matches 3 questions).")
+    elif len(words) >= 3:
+        errors.append(f"Detected {sentence_units} sentence unit(s); speak 3 clear sentences (one for each question).")
+
+    if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
+        errors.append("Subject-verb agreement: with he/she/it use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies, gets).")
+
+    if re.search(r"\b(i|we|they|you)\s+(has|does|goes|watches|studies|gets)\b", lower):
+        errors.append("Subject-verb agreement: with I/we/they/you use base verbs (have, do, go, watch, study, get).")
+
+    if re.search(r"\bi\s+(is|are)\b", lower):
+        errors.append("Verb 'be': use 'am' with 'I'.")
+
+    if re.search(r"\b(he|she|it)\s+(am|are)\b", lower):
+        errors.append("Verb 'be': use 'is' with 'he/she/it'.")
+
+    if re.search(r"\b(we|they|you)\s+(am|is)\b", lower):
+        errors.append("Verb 'be': use 'are' with 'we/they/you'.")
+
+    if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
+        errors.append("Articles: use 'an' before vowel sounds (e.g., 'an orange', 'an old house', 'an umbrella').")
+
+    if re.search(r"\b(don't|doesn't)\s+(has|is|are|went|came|ate|had|did)\b", lower):
+        errors.append("Negatives: use the base verb after 'don't' or 'doesn't' (e.g., 'don't have', 'doesn't live').")
+
+    if "how old's" in lower:
+        errors.append("Question form: say 'How old is she?' instead of 'How old's she?'.")
+
+    passed = (len(errors) == 0) and (len(words) >= 3)
+    score_pct = 100 if passed else max(0, min(90, 80 - len(errors) * 20))
+
+    if passed:
+        good.append("Grammar check passed with zero errors.")
+
+    return {
+        "passed": passed,
+        "score_pct": score_pct,
+        "transcript": clean if clean else "(no spoken text provided)",
+        "good": good,
+        "errors": errors,
+    }
+
 
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
     s = re.sub(r"\s+([?.!,])", r"\1", s)
     return s
 
+
 def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> str:
     if is_correct:
         return (
             f"**AI Tutor Feedback — Great job!**\n"
             f"- **Why it works:** {q['rule']}\n"
-            f"- **Next step:** Tap **Pronunciation** and say the full sentence out loud."
+            f"- **Next step:** Tap **🔊 Speak** and say the full sentence out loud."
         )
     expected = q.get("answer") or q.get("correct", "")
     tips = ["**AI Tutor Feedback — Let's fix this together:**"]
@@ -416,22 +403,23 @@ def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> st
     tips.append(f"- **Grammar rule:** {q['rule']}")
     return "\n".join(tips)
 
+
 if "q_index" not in st.session_state:
     st.session_state.q_index = 0
 if "answers" not in st.session_state:
     st.session_state.answers = {}
 if "scores" not in st.session_state:
     st.session_state.scores = {}
-if "speak_index" not in st.session_state:
-    st.session_state.speak_index = 0
-if "speak_feedback" not in st.session_state:
-    st.session_state.speak_feedback = {}
+if "sp_index" not in st.session_state:
+    st.session_state.sp_index = 0
+if "sp_grades" not in st.session_state:
+    st.session_state.sp_grades = {}
 
 st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>Step-by-Step Grammar (10 MCQ + 5 Sentence Patterns) &amp; Voice-Graded Speaking</p>
+        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Speak</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -439,7 +427,7 @@ st.markdown(
 
 section = st.radio(
     "Choose Quiz Stage:",
-    ["1. Grammar Quiz (Questions 1–15, One by One)", "2. Speaking Practice (15 Items × 3 Questions)"],
+    ["1. Grammar Quiz (Questions 1–15)", "2. Speaking Practice (15 Sets × 3 Questions)"],
     horizontal=True,
 )
 
@@ -452,7 +440,7 @@ if section.startswith("1."):
     st.markdown(f'<div class="q-badge">{q["type"]} • Question {q_num}</div>', unsafe_allow_html=True)
     if q_num <= 10:
         st.markdown(f'<div class="q-prompt">{q["prompt"]}</div>', unsafe_allow_html=True)
-        pronounce_button(q["pronounce"], label="🔊 Pronunciation", key_id=f"q_{q_num}")
+        speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
         selected = st.radio("Choose one option:", q["options"], index=None, key=f"radio_q_{q_num}")
         if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
             if selected is None:
@@ -463,8 +451,11 @@ if section.startswith("1."):
                 st.session_state.answers[q_num] = (selected, ok)
                 st.session_state.scores[q_num] = ok
     else:
-        st.markdown(f'<div class="q-prompt">Arrange the mixed words into a full correct sentence:<br/><code>{q["mixed"]}</code></div>', unsafe_allow_html=True)
-        pronounce_button(q["pronounce"], label="🔊 Pronunciation", key_id=f"q_{q_num}")
+        st.markdown(
+            f'<div class="q-prompt">Arrange the mixed words into a full correct sentence:<br/><code>{q["mixed"]}</code></div>',
+            unsafe_allow_html=True,
+        )
+        speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
         typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
         if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
             norm_u = normalize_str(typed)
@@ -478,6 +469,7 @@ if section.startswith("1."):
             st.session_state.answers[q_num] = (typed, ok)
             st.session_state.scores[q_num] = ok
     st.markdown("</div>", unsafe_allow_html=True)
+
     if q_num in st.session_state.answers:
         ans_val, was_ok = st.session_state.answers[q_num]
         if was_ok:
@@ -487,6 +479,7 @@ if section.startswith("1."):
         st.markdown('<div class="tutor-box">', unsafe_allow_html=True)
         st.markdown(grammar_ai_tutor_feedback(q, ans_val, was_ok))
         st.markdown("</div>", unsafe_allow_html=True)
+
     col_prev, col_next, col_score = st.columns([1, 1, 2])
     with col_prev:
         if st.button("⬅️ Previous", disabled=(idx == 0)):
@@ -499,22 +492,61 @@ if section.startswith("1."):
     with col_score:
         total_right = sum(1 for v in st.session_state.scores.values() if v)
         st.info(f"**Score:** {total_right} / {len(ALL_15_QUESTIONS)} answered correctly")
+
 else:
-    s_idx = st.session_state.speak_index
-    item_no, three_qs = SPEAKING_15_ITEMS[s_idx]
-    st.progress((s_idx + 1) / len(SPEAKING_15_ITEMS), text=f"Speaking Set {item_no} of {len(SPEAKING_15_ITEMS)}")
+    item_no, three_qs = SPEAKING_15_ITEMS[st.session_state.sp_index]
+    st.progress((st.session_state.sp_index + 1) / len(SPEAKING_15_ITEMS), text=f"Set {item_no} of {len(SPEAKING_15_ITEMS)}")
+
     st.markdown('<div class="speak-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions (Speak 3 Sentences)</div>', unsafe_allow_html=True)
-    st.markdown(f"1. **{three_qs[0]}**<br/>2. **{three_qs[1]}**<br/>3. **{three_qs[2]}**", unsafe_allow_html=True)
+    st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"1. **{three_qs[0]}**<br/>2. **{three_qs[1]}**<br/>3. **{three_qs[2]}**",
+        unsafe_allow_html=True,
+    )
     st.markdown("</div>", unsafe_allow_html=True)
-    pronounce_button(" ".join(three_qs), label="🔊 Listen Questions", key_id=f"sp_{item_no}")
-    voice_auto_grade_widget(item_no, three_qs)
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("⬅️ Previous Speaking Set", disabled=(s_idx == 0)):
-            st.session_state.speak_index = max(0, s_idx - 1)
+
+    speaker(" ".join(three_qs), label="🔊 Speak", key_id=f"spk_set_{item_no}")
+
+    audio_rec = st.audio_input("Record Voice", key=f"audio_rec_{item_no}") if hasattr(st, "audio_input") else None
+    uploaded_voice = st.file_uploader(
+        "Or upload voice recording (if preferred)",
+        type=["wav", "mp3", "m4a", "ogg", "webm"],
+        key=f"up_voice_{item_no}",
+    )
+    spoken_words = st.text_area(
+        "Spoken sentences (tap iPhone keyboard 🎤 mic or type what you said for all 3 questions):",
+        key=f"spoken_words_{item_no}",
+        height=90,
+        placeholder="Example: My name is Zameer. I am from Tajikistan. I spell it Z-A-M-E-E-R.",
+    )
+
+    if st.button("Done", type="primary", key=f"done_{item_no}"):
+        active_audio = audio_rec if audio_rec is not None else uploaded_voice
+        has_aud = active_audio is not None
+        aud_len = len(active_audio.getvalue()) if active_audio is not None else 0
+        st.session_state.sp_grades[item_no] = grade_speaking_response(spoken_words, has_aud, aud_len)
+
+    grade = st.session_state.sp_grades.get(item_no)
+    if grade:
+        st.markdown('<div class="grade-box">', unsafe_allow_html=True)
+        if grade["passed"]:
+            st.success(f"✓ CORRECT — Grade: {grade['score_pct']}%")
+        else:
+            st.error(f"✗ NEEDS FIXES — Grade: {grade['score_pct']}%")
+
+        st.markdown(f"**Checked Speech:** {grade['transcript']}")
+        for g in grade["good"]:
+            st.markdown(f"- ✅ {g}")
+        for e in grade["errors"]:
+            st.markdown(f"- ❌ {e}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    prev_col, next_col = st.columns(2)
+    with prev_col:
+        if st.button("⬅️ Previous", disabled=(st.session_state.sp_index == 0)):
+            st.session_state.sp_index = max(0, st.session_state.sp_index - 1)
             st.rerun()
-    with c2:
-        if st.button("Next Speaking Set ➡️", disabled=(s_idx == len(SPEAKING_15_ITEMS) - 1)):
-            st.session_state.speak_index = min(len(SPEAKING_15_ITEMS) - 1, s_idx + 1)
+    with next_col:
+        if st.button("Next ➡️", disabled=(st.session_state.sp_index == len(SPEAKING_15_ITEMS) - 1)):
+            st.session_state.sp_index = min(len(SPEAKING_15_ITEMS) - 1, st.session_state.sp_index + 1)
             st.rerun()
