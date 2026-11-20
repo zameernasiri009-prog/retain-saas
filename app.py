@@ -1,9 +1,10 @@
+import hashlib
 import html
+import io
 import json
 import os
 import re
 import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="English Learning Interactive Quiz & Speaking Grader",
@@ -240,139 +241,68 @@ def get_api_key() -> str:
     return os.environ.get("OPENAI_API_KEY", "").strip()
 
 
-def speaker(text: str, label: str = "🔊 Listen", key_id: str = "spk"):
-    payload = json.dumps(text)
-    safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
-    components.html(
-        f"""
-        <button type="button" id="btn_{safe_id}" onclick="say_{safe_id}()"
-            style="background:#2563EB;color:#FFFFFF;border:none;padding:9px 16px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
-            {html.escape(label)}
-        </button>
-        <span id="spk_out_{safe_id}" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>
-        <script>
-        function say_{safe_id}() {{
-            const t = {payload};
-            const out = document.getElementById("spk_out_{safe_id}");
-            if ("speechSynthesis" in window) {{
-                window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance(t);
-                u.lang = "en-US";
-                u.rate = 0.95;
-                out.textContent = "Listening...";
-                u.onend = () => {{ out.textContent = ""; }};
-                u.onerror = () => {{ out.textContent = t; }};
-                window.speechSynthesis.speak(u);
-            }} else {{
-                out.textContent = t;
-            }}
-        }}
-        </script>
-        """,
-        height=48,
-    )
+@st.cache_data(show_spinner=False)
+def synthesize_listen_audio(text: str, api_key: str) -> bytes | None:
+    if not api_key or not text.strip():
+        return None
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        speech = client.audio.speech.create(
+            model="gpt-4o-mini-tts",
+            voice="alloy",
+            input=text,
+        )
+        return speech.read()
+    except Exception:
+        return None
 
 
-def local_grammar_fallback(spoken_text: str, has_audio: bool, audio_bytes_len: int) -> dict:
-    clean = re.sub(r"\s+", " ", (spoken_text or "").strip())
-    lower = clean.lower()
-    words = re.findall(r"[A-Za-z']+", clean)
+def listen_widget(text: str, key_id: str, api_key: str):
+    if st.button("🔊 Listen", key=f"btn_listen_{key_id}"):
+        st.session_state[f"show_listen_{key_id}"] = True
 
-    punct_sentences = [s.strip() for s in re.split(r"[.!?]+", clean) if len(re.findall(r"[A-Za-z']+", s)) >= 2]
-    clause_parts = [c.strip() for c in re.split(r"\b(?:and|but|because|so)\b", clean, flags=re.I) if len(re.findall(r"[A-Za-z']+", c)) >= 2]
-    sentence_units = max(len(punct_sentences), len(clause_parts))
-
-    errors = []
-    good = []
-
-    if has_audio:
-        good.append(f"Voice recorded ({audio_bytes_len:,} bytes).")
-    else:
-        errors.append("No voice recording attached yet. Tap Record Voice above.")
-
-    if len(words) >= 3:
-        good.append(f"Spoken text captured ({len(words)} words).")
-    else:
-        errors.append("No transcript or spoken text detected yet. Add OPENAI_API_KEY in Secrets for auto-transcription, or type/dictate your words.")
-
-    if sentence_units >= 3:
-        good.append(f"Detected {sentence_units} sentence units for the 3 prompts.")
-    elif len(words) >= 3:
-        errors.append(f"Detected {sentence_units} sentence unit(s); answer all 3 questions clearly.")
-
-    if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
-        errors.append("Subject-verb agreement: use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies, gets) with he/she/it.")
-
-    if re.search(r"\b(i|we|they|you)\s+(has|does|goes|watches|studies|gets)\b", lower):
-        errors.append("Subject-verb agreement: use base verbs (have, do, go, watch, study, get) with I/we/they/you.")
-
-    if re.search(r"\bi\s+(is|are)\b", lower):
-        errors.append("Verb 'be': use 'am' with 'I'.")
-
-    if re.search(r"\b(he|she|it)\s+(am|are)\b", lower):
-        errors.append("Verb 'be': use 'is' with 'he/she/it'.")
-
-    if re.search(r"\b(we|they|you)\s+(am|is)\b", lower):
-        errors.append("Verb 'be': use 'are' with 'we/they/you'.")
-
-    if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
-        errors.append("Articles: use 'an' before vowel sounds (e.g., 'an orange', 'an old house', 'an umbrella').")
-
-    if re.search(r"\b(don't|doesn't)\s+(has|is|are|went|came|ate|had|did)\b", lower):
-        errors.append("Negatives: use the base verb after 'don't' or 'doesn't'.")
-
-    if "how old's" in lower:
-        errors.append("Question form: use 'How old is she?' instead of 'How old's she?'.")
-
-    passed = (len(errors) == 0) and (len(words) >= 3)
-    score_pct = 100 if passed else max(0, min(85, 85 - len(errors) * 15))
-
-    if passed:
-        good.append("Grammar check passed with zero errors.")
-
-    return {
-        "passed": passed,
-        "score_pct": score_pct,
-        "transcript": clean if clean else "(no transcript available)",
-        "good": good,
-        "errors": errors,
-        "corrected_example": "",
-    }
+    if st.session_state.get(f"show_listen_{key_id}"):
+        mp3_bytes = synthesize_listen_audio(text, api_key)
+        if mp3_bytes:
+            st.audio(mp3_bytes, format="audio/mp3")
+        else:
+            st.warning("Add `OPENAI_API_KEY` in Streamlit Secrets to enable 🔊 Listen audio.")
 
 
-def grade_speaking_response(
-    questions: list[str],
-    spoken_text: str,
-    audio_file,
-) -> dict:
-    has_audio = audio_file is not None
-    audio_bytes = audio_file.getvalue() if has_audio else b""
+def ai_grade_voice(questions: list[str], audio_bytes: bytes, mime_type: str, filename: str, api_key: str) -> dict:
     audio_bytes_len = len(audio_bytes)
-    api_key = get_api_key()
 
     if not api_key:
-        return local_grammar_fallback(spoken_text, has_audio, audio_bytes_len)
+        return {
+            "passed": False,
+            "score_pct": 0,
+            "transcript": "(OPENAI_API_KEY not configured)",
+            "good": [f"Voice recorded ({audio_bytes_len:,} bytes)."],
+            "errors": ["Add OPENAI_API_KEY in Streamlit Secrets to transcribe voice and check grammar automatically."],
+            "corrections": [],
+        }
 
     try:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key)
-        transcript = (spoken_text or "").strip()
-
-        if has_audio and audio_bytes_len > 0:
-            mime_type = getattr(audio_file, "type", None) or "audio/wav"
-            ext = "mp3" if "mp3" in mime_type else ("m4a" if "m4a" in mime_type else "wav")
-            filename = getattr(audio_file, "name", None) or f"recording.{ext}"
-            stt = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=(filename, audio_bytes, mime_type),
-            )
-            heard = (getattr(stt, "text", "") or "").strip()
-            if heard:
-                transcript = heard
+        stt = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(filename, io.BytesIO(audio_bytes), mime_type),
+        )
+        transcript = (getattr(stt, "text", "") or "").strip()
 
         if not transcript:
-            return local_grammar_fallback("", has_audio, audio_bytes_len)
+            return {
+                "passed": False,
+                "score_pct": 0,
+                "transcript": "(no clear speech detected)",
+                "good": [f"Voice recorded ({audio_bytes_len:,} bytes)."],
+                "errors": ["No clear words were heard in the recording. Record again and speak clearly."],
+                "corrections": [],
+            }
 
         prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
         response = client.responses.create(
@@ -381,16 +311,18 @@ def grade_speaking_response(
                 {
                     "role": "system",
                     "content": (
-                        "You are an encouraging English speaking & grammar coach. "
-                        "Evaluate the student's spoken response to 3 prompts. "
+                        "You are an English speaking & grammar grader. "
+                        "Grade the student's spoken transcript against the 3 questions. "
                         "Return ONLY valid JSON with keys: "
-                        "passed (boolean), score_pct (integer 0-100), good (list of short strings), "
-                        "errors (list of short grammar/clarity fixes), corrected_example (string)."
+                        "passed (boolean), score_pct (integer 0-100), "
+                        "good (list of short strings showing what grammar/answers are correct), "
+                        "errors (list of short strings showing what grammar/answers are wrong), "
+                        "corrections (list of short 'Wrong -> Better' strings)."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": f"Speaking prompts:\n{prompt_block}\n\nStudent transcript:\n{transcript}",
+                    "content": f"Questions:\n{prompt_block}\n\nStudent spoken transcript:\n{transcript}",
                 },
             ],
         )
@@ -399,9 +331,8 @@ def grade_speaking_response(
         data = json.loads(json_match.group(0) if json_match else raw_text)
 
         good_list = [str(x) for x in data.get("good", []) if x]
-        if has_audio:
-            good_list.insert(0, f"Voice recorded ({audio_bytes_len:,} bytes) and transcribed.")
         error_list = [str(x) for x in data.get("errors", []) if x]
+        corrections_list = [str(x) for x in data.get("corrections", []) if x]
         score_val = max(0, min(100, int(data.get("score_pct", 0))))
         passed_val = bool(data.get("passed", len(error_list) == 0 and score_val >= 80))
 
@@ -411,12 +342,17 @@ def grade_speaking_response(
             "transcript": transcript,
             "good": good_list,
             "errors": error_list,
-            "corrected_example": str(data.get("corrected_example", "")).strip(),
+            "corrections": corrections_list,
         }
     except Exception as exc:
-        fb = local_grammar_fallback(spoken_text, has_audio, audio_bytes_len)
-        fb["errors"].insert(0, f"AI grading fallback used ({exc}).")
-        return fb
+        return {
+            "passed": False,
+            "score_pct": 0,
+            "transcript": "(error grading recording)",
+            "good": [f"Voice recorded ({audio_bytes_len:,} bytes)."],
+            "errors": [f"Could not process voice with AI: {exc}"],
+            "corrections": [],
+        }
 
 
 def normalize_str(s: str) -> str:
@@ -458,11 +394,13 @@ if "sp_index" not in st.session_state:
 if "sp_grades" not in st.session_state:
     st.session_state.sp_grades = {}
 
+api_key = get_api_key()
+
 st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Listen &amp; AI Review</p>
+        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Listen &amp; Voice AI Grader</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -483,7 +421,7 @@ if section.startswith("1."):
 
     if q_num <= 10:
         st.markdown(f'<div class="q-prompt">{html.escape(q["prompt"])}</div>', unsafe_allow_html=True)
-        speaker(q["pronounce"], label="🔊 Listen", key_id=f"gram_{q_num}")
+        listen_widget(q["pronounce"], key_id=f"gram_{q_num}", api_key=api_key)
         selected = st.radio("Choose one option:", q["options"], index=None, key=f"radio_q_{q_num}")
         if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
             if selected is None:
@@ -496,7 +434,7 @@ if section.startswith("1."):
     else:
         st.markdown('<div class="q-prompt">Arrange the mixed words into a full correct sentence:</div>', unsafe_allow_html=True)
         st.code(q["mixed"], language="text")
-        speaker(q["pronounce"], label="🔊 Listen", key_id=f"gram_{q_num}")
+        listen_widget(q["pronounce"], key_id=f"gram_{q_num}", api_key=api_key)
         typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
         if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
             norm_u = normalize_str(typed)
@@ -539,38 +477,51 @@ else:
     for i, sq in enumerate(three_qs, start=1):
         st.markdown(f"**{i}. {sq}**")
 
-    speaker(" ".join(three_qs), label="🔊 Listen", key_id=f"spk_set_{item_no}")
+    listen_widget(" ".join(three_qs), key_id=f"spk_set_{item_no}", api_key=api_key)
 
-    audio_rec = st.audio_input("Record Voice", key=f"audio_rec_{item_no}") if hasattr(st, "audio_input") else None
-    st.caption("If the mic shows an error on phone/browser, allow microphone permission or tap the refresh icon on the recorder.")
-
-    spoken_words = st.text_area(
-        "Spoken sentences:",
-        key=f"spoken_words_{item_no}",
-        height=90,
+    audio_rec = (
+        st.audio_input("Record Voice", sample_rate=16000, key=f"audio_rec_{item_no}")
+        if hasattr(st, "audio_input")
+        else None
     )
 
-    if st.button("Done", type="primary", key=f"done_{item_no}"):
-        st.session_state.sp_grades[item_no] = grade_speaking_response(
-            three_qs,
-            spoken_words,
-            audio_rec,
-        )
+    if audio_rec is not None:
+        audio_bytes = audio_rec.getvalue()
+        if audio_bytes:
+            audio_hash = hashlib.md5(audio_bytes).hexdigest()
+            cache_key = f"graded_{item_no}_{audio_hash}"
+            mime_type = getattr(audio_rec, "type", None) or "audio/wav"
+            filename = getattr(audio_rec, "name", None) or "recording.wav"
 
-    grade = st.session_state.sp_grades.get(item_no)
-    if grade:
-        if grade["passed"]:
-            st.success(f"✓ CORRECT — Grade: {grade['score_pct']}%")
-        else:
-            st.error(f"✗ NEEDS FIXES — Grade: {grade['score_pct']}%")
+            if cache_key not in st.session_state.sp_grades:
+                with st.spinner("Checking grammar with AI..."):
+                    st.session_state.sp_grades[cache_key] = ai_grade_voice(
+                        three_qs,
+                        audio_bytes,
+                        mime_type,
+                        filename,
+                        api_key,
+                    )
 
-        st.markdown(f"**Checked Speech:** {grade['transcript']}")
-        for g in grade["good"]:
-            st.markdown(f"- ✅ {g}")
-        for e in grade["errors"]:
-            st.markdown(f"- ❌ {e}")
-        if grade.get("corrected_example"):
-            st.info(f"**Model Answer:** {grade['corrected_example']}")
+            grade = st.session_state.sp_grades[cache_key]
+            if grade["passed"]:
+                st.success(f"✓ CORRECT — Grade: {grade['score_pct']}%")
+            else:
+                st.error(f"✗ NEEDS FIXES — Grade: {grade['score_pct']}%")
+
+            st.markdown(f"**What You Said:** {grade['transcript']}")
+            if grade["good"]:
+                st.markdown("**Correct:**")
+                for g in grade["good"]:
+                    st.markdown(f"- ✅ {g}")
+            if grade["errors"]:
+                st.markdown("**Wrong / Needs Fix:**")
+                for e in grade["errors"]:
+                    st.markdown(f"- ❌ {e}")
+            if grade["corrections"]:
+                st.markdown("**How to Say It Right:**")
+                for c in grade["corrections"]:
+                    st.markdown(f"- ✏️ {c}")
 
     prev_col, next_col = st.columns(2)
     with prev_col:
