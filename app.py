@@ -1,4 +1,6 @@
+import html
 import json
+import os
 import re
 import streamlit as st
 import streamlit.components.v1 as components
@@ -33,18 +35,6 @@ st.markdown(
             font-size: 13px;
             color: #F8FAFC !important;
         }
-        .step-card {
-            background: #111827;
-            border: 1px solid #334155;
-            border-left: 5px solid #38BDF8;
-            border-radius: 10px;
-            padding: 18px 20px;
-            margin: 12px 0 16px 0;
-            color: #FFFFFF !important;
-        }
-        .step-card * {
-            color: #FFFFFF !important;
-        }
         .q-badge {
             display: inline-block;
             background: #1D4ED8;
@@ -58,44 +48,8 @@ st.markdown(
         .q-prompt {
             font-size: 18px;
             font-weight: 600;
-            color: #FFFFFF !important;
             margin: 6px 0 12px 0;
             line-height: 1.45;
-        }
-        .tutor-box {
-            background: #0F172A;
-            border: 1px solid #2DD4BF;
-            border-left: 5px solid #14B8A6;
-            border-radius: 10px;
-            padding: 14px 18px;
-            margin-top: 12px;
-            color: #FFFFFF !important;
-        }
-        .tutor-box *, .tutor-box p, .tutor-box li, .tutor-box strong, .tutor-box code {
-            color: #FFFFFF !important;
-        }
-        .speak-card {
-            background: #1E1B4B;
-            border: 1px solid #F59E0B;
-            border-left: 5px solid #F59E0B;
-            border-radius: 10px;
-            padding: 16px 20px;
-            margin: 12px 0;
-            color: #FFFFFF !important;
-        }
-        .speak-card *, .speak-card p, .speak-card strong {
-            color: #FFFFFF !important;
-        }
-        .grade-box {
-            background: #0F172A;
-            border: 1px solid #2DD4BF;
-            border-radius: 10px;
-            padding: 14px 18px;
-            margin-top: 12px;
-            color: #FFFFFF !important;
-        }
-        .grade-box * {
-            color: #FFFFFF !important;
         }
     </style>
     """,
@@ -115,7 +69,7 @@ MCQ_QUESTIONS = [
     {
         "num": 2,
         "type": "Multiple Choice",
-        "prompt": '"___ is she?\" — \"She\'s ten.\" And \"___\'s he from?\"',
+        "prompt": '"___ is she?" — "She\'s ten." And "___\'s he from?"',
         "pronounce": "How old is she? She is ten. And where is he from?",
         "options": ["A) Where / How old", "B) How old / Where", "C) Who / When"],
         "answer": "B) How old / Where",
@@ -124,11 +78,11 @@ MCQ_QUESTIONS = [
     {
         "num": 3,
         "type": "Multiple Choice",
-        "prompt": '"Are they Mexican?\" — \"No, they ___.\" And \"We ___ from Canada.\"',
+        "prompt": '"Are they Mexican?" — "No, they ___." And "We ___ from Canada."',
         "pronounce": "Are they Mexican? No, they are not. And we are from Canada.",
         "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
-        "rule": "Plural subjects 'they' and 'we' use 'aren't' and 're (are) with the verb 'be'.",
+        "rule": "Plural subjects 'they' and 'we' use 'aren't' and "'re" (are) with the verb 'be'.",
     },
     {
         "num": 4,
@@ -151,7 +105,7 @@ MCQ_QUESTIONS = [
     {
         "num": 6,
         "type": "Multiple Choice",
-        "prompt": '"What are ___ right here?\" — \"They\'re keys.\" And \"Who are ___ girls over there?\"',
+        "prompt": '"What are ___ right here?" — "They\'re keys." And "Who are ___ girls over there?"',
         "pronounce": "What are these right here? They are keys. And who are those girls over there?",
         "options": ["A) that / this", "B) these / those", "C) this / that"],
         "answer": "B) these / those",
@@ -161,7 +115,7 @@ MCQ_QUESTIONS = [
         "num": 7,
         "type": "Multiple Choice",
         "prompt": "This is my ___ house, and Senegal is in Africa. ___ flag is red, yellow, and green.",
-        "pronounce": "This is my parents house, and Senegal is in Africa. Its flag is red, yellow, and green.",
+        "pronounce": "This is my parents' house, and Senegal is in Africa. Its flag is red, yellow, and green.",
         "options": ["A) parents' / Its", "B) parent's / It's", "C) parents's / Their"],
         "answer": "A) parents' / Its",
         "rule": "Plural possessive ends with an apostrophe after s ('parents''), and possessive 'Its' has no apostrophe.",
@@ -182,7 +136,7 @@ MCQ_QUESTIONS = [
     {
         "num": 9,
         "type": "Multiple Choice",
-        "prompt": '"___ you live near here?\" — \"No, I ___.\" And \"We ___ have meat for dinner.\"',
+        "prompt": '"___ you live near here?" — "No, I ___." And "We ___ have meat for dinner."',
         "pronounce": "Do you live near here? No, I do not. And we do not have meat for dinner.",
         "options": ["A) Do / don't / don't", "B) Does / doesn't / aren't", "C) Are / 'm not / not"],
         "answer": "A) Do / don't / don't",
@@ -248,7 +202,7 @@ REWRITE_QUESTIONS = [
     {
         "num": 15,
         "type": "Sentence Pattern (Mixed Words)",
-        "mixed": "breakfast / always / have / I /",
+        "mixed": "breakfast / always / have / I",
         "pronounce": "I always have breakfast.",
         "accepted": ["i always have breakfast.", "i always have breakfast"],
         "correct": "I always have breakfast.",
@@ -277,6 +231,15 @@ SPEAKING_15_ITEMS = [
 ]
 
 
+def get_api_key() -> str:
+    try:
+        if "OPENAI_API_KEY" in st.secrets and st.secrets["OPENAI_API_KEY"]:
+            return str(st.secrets["OPENAI_API_KEY"]).strip()
+    except Exception:
+        pass
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
 def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
     payload = json.dumps(text)
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
@@ -284,7 +247,7 @@ def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
         f"""
         <button type="button" id="btn_{safe_id}" onclick="say_{safe_id}()"
             style="background:#2563EB;color:#FFFFFF;border:none;padding:9px 16px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">
-            {label}
+            {html.escape(label)}
         </button>
         <span id="spk_out_{safe_id}" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>
         <script>
@@ -310,7 +273,7 @@ def speaker(text: str, label: str = "🔊 Speak", key_id: str = "spk"):
     )
 
 
-def grade_speaking_response(spoken_text: str, has_audio: bool, audio_bytes_len: int) -> dict:
+def local_grammar_fallback(spoken_text: str, has_audio: bool, audio_bytes_len: int) -> dict:
     clean = re.sub(r"\s+", " ", (spoken_text or "").strip())
     lower = clean.lower()
     words = re.findall(r"[A-Za-z']+", clean)
@@ -328,20 +291,20 @@ def grade_speaking_response(spoken_text: str, has_audio: bool, audio_bytes_len: 
         errors.append("No voice recording attached yet. Tap Record Voice above.")
 
     if len(words) >= 3:
-        good.append(f"Spoken response captured ({len(words)} words).")
+        good.append(f"Spoken text captured ({len(words)} words).")
     else:
-        errors.append("Enter or dictate your spoken sentences so grammar can be checked.")
+        errors.append("No transcript or spoken text detected yet. Add OPENAI_API_KEY in Secrets for auto-transcription, or type/dictate your words.")
 
     if sentence_units >= 3:
-        good.append(f"Answered with {sentence_units} sentence units (matches 3 questions).")
+        good.append(f"Detected {sentence_units} sentence units for the 3 prompts.")
     elif len(words) >= 3:
-        errors.append(f"Detected {sentence_units} sentence unit(s); speak 3 clear sentences (one for each question).")
+        errors.append(f"Detected {sentence_units} sentence unit(s); answer all 3 questions clearly.")
 
     if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study|get)\b", lower):
-        errors.append("Subject-verb agreement: with he/she/it use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies, gets).")
+        errors.append("Subject-verb agreement: use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies, gets) with he/she/it.")
 
     if re.search(r"\b(i|we|they|you)\s+(has|does|goes|watches|studies|gets)\b", lower):
-        errors.append("Subject-verb agreement: with I/we/they/you use base verbs (have, do, go, watch, study, get).")
+        errors.append("Subject-verb agreement: use base verbs (have, do, go, watch, study, get) with I/we/they/you.")
 
     if re.search(r"\bi\s+(is|are)\b", lower):
         errors.append("Verb 'be': use 'am' with 'I'.")
@@ -356,13 +319,13 @@ def grade_speaking_response(spoken_text: str, has_audio: bool, audio_bytes_len: 
         errors.append("Articles: use 'an' before vowel sounds (e.g., 'an orange', 'an old house', 'an umbrella').")
 
     if re.search(r"\b(don't|doesn't)\s+(has|is|are|went|came|ate|had|did)\b", lower):
-        errors.append("Negatives: use the base verb after 'don't' or 'doesn't' (e.g., 'don't have', 'doesn't live').")
+        errors.append("Negatives: use the base verb after 'don't' or 'doesn't'.")
 
     if "how old's" in lower:
-        errors.append("Question form: say 'How old is she?' instead of 'How old's she?'.")
+        errors.append("Question form: use 'How old is she?' instead of 'How old's she?'.")
 
     passed = (len(errors) == 0) and (len(words) >= 3)
-    score_pct = 100 if passed else max(0, min(90, 80 - len(errors) * 20))
+    score_pct = 100 if passed else max(0, min(85, 85 - len(errors) * 15))
 
     if passed:
         good.append("Grammar check passed with zero errors.")
@@ -370,10 +333,90 @@ def grade_speaking_response(spoken_text: str, has_audio: bool, audio_bytes_len: 
     return {
         "passed": passed,
         "score_pct": score_pct,
-        "transcript": clean if clean else "(no spoken text provided)",
+        "transcript": clean if clean else "(no transcript available)",
         "good": good,
         "errors": errors,
+        "corrected_example": "",
     }
+
+
+def grade_speaking_response(
+    questions: list[str],
+    spoken_text: str,
+    audio_file,
+) -> dict:
+    has_audio = audio_file is not None
+    audio_bytes = audio_file.getvalue() if has_audio else b""
+    audio_bytes_len = len(audio_bytes)
+    api_key = get_api_key()
+
+    if not api_key:
+        return local_grammar_fallback(spoken_text, has_audio, audio_bytes_len)
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        transcript = (spoken_text or "").strip()
+
+        if has_audio and audio_bytes_len > 0:
+            mime_type = getattr(audio_file, "type", None) or "audio/wav"
+            ext = "mp3" if "mp3" in mime_type else ("m4a" if "m4a" in mime_type else "wav")
+            filename = getattr(audio_file, "name", None) or f"recording.{ext}"
+            stt = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=(filename, audio_bytes, mime_type),
+            )
+            heard = (getattr(stt, "text", "") or "").strip()
+            if heard:
+                transcript = heard
+
+        if not transcript:
+            return local_grammar_fallback("", has_audio, audio_bytes_len)
+
+        prompt_block = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+        response = client.responses.create(
+            model="gpt-4o-mini",
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an encouraging English speaking & grammar coach. "
+                        "Evaluate the student's spoken response to 3 prompts. "
+                        "Return ONLY valid JSON with keys: "
+                        "passed (boolean), score_pct (integer 0-100), good (list of short strings), "
+                        "errors (list of short grammar/clarity fixes), corrected_example (string)."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Speaking prompts:\n{prompt_block}\n\nStudent transcript:\n{transcript}",
+                },
+            ],
+        )
+        raw_text = (getattr(response, "output_text", "") or "").strip()
+        json_match = re.search(r"\{.*\}", raw_text, flags=re.S)
+        data = json.loads(json_match.group(0) if json_match else raw_text)
+
+        good_list = [str(x) for x in data.get("good", []) if x]
+        if has_audio:
+            good_list.insert(0, f"Voice recorded ({audio_bytes_len:,} bytes) and transcribed.")
+        error_list = [str(x) for x in data.get("errors", []) if x]
+        score_val = max(0, min(100, int(data.get("score_pct", 0))))
+        passed_val = bool(data.get("passed", len(error_list) == 0 and score_val >= 80))
+
+        return {
+            "passed": passed_val,
+            "score_pct": score_val,
+            "transcript": transcript,
+            "good": good_list,
+            "errors": error_list,
+            "corrected_example": str(data.get("corrected_example", "")).strip(),
+        }
+    except Exception as exc:
+        fb = local_grammar_fallback(spoken_text, has_audio, audio_bytes_len)
+        fb["errors"].insert(0, f"AI grading fallback used ({exc}).")
+        return fb
 
 
 def normalize_str(s: str) -> str:
@@ -419,7 +462,7 @@ st.markdown(
     """
     <div class="main-banner">
         <h1>🎓 ENGLISH LEARNING INTERACTIVE QUIZ</h1>
-        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Speak</p>
+        <p>15 Grammar Items (10 MCQ + 5 Sentence Patterns) &amp; 15 Speaking Sets with 🔊 Speak &amp; AI Review</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -436,10 +479,10 @@ if section.startswith("1."):
     q = ALL_15_QUESTIONS[idx]
     q_num = q["num"]
     st.progress((idx + 1) / len(ALL_15_QUESTIONS), text=f"Question {q_num} of {len(ALL_15_QUESTIONS)}")
-    st.markdown('<div class="step-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="q-badge">{q["type"]} • Question {q_num}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="q-badge">{html.escape(q["type"])} • Question {q_num}</div>', unsafe_allow_html=True)
+
     if q_num <= 10:
-        st.markdown(f'<div class="q-prompt">{q["prompt"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="q-prompt">{html.escape(q["prompt"])}</div>', unsafe_allow_html=True)
         speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
         selected = st.radio("Choose one option:", q["options"], index=None, key=f"radio_q_{q_num}")
         if st.button("Check Answer", type="primary", key=f"chk_mcq_{q_num}"):
@@ -451,10 +494,8 @@ if section.startswith("1."):
                 st.session_state.answers[q_num] = (selected, ok)
                 st.session_state.scores[q_num] = ok
     else:
-        st.markdown(
-            f'<div class="q-prompt">Arrange the mixed words into a full correct sentence:<br/><code>{q["mixed"]}</code></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<div class="q-prompt">Arrange the mixed words into a full correct sentence:</div>', unsafe_allow_html=True)
+        st.code(q["mixed"], language="text")
         speaker(q["pronounce"], label="🔊 Speak", key_id=f"gram_{q_num}")
         typed = st.text_input("Write your full sentence here:", key=f"rewrite_q_{q_num}")
         if st.button("Check Sentence", type="primary", key=f"chk_rew_{q_num}"):
@@ -468,7 +509,6 @@ if section.startswith("1."):
                     break
             st.session_state.answers[q_num] = (typed, ok)
             st.session_state.scores[q_num] = ok
-    st.markdown("</div>", unsafe_allow_html=True)
 
     if q_num in st.session_state.answers:
         ans_val, was_ok = st.session_state.answers[q_num]
@@ -476,9 +516,7 @@ if section.startswith("1."):
             st.success("✅ Correct!")
         else:
             st.error("❌ Not quite right — check the AI Tutor feedback below.")
-        st.markdown('<div class="tutor-box">', unsafe_allow_html=True)
         st.markdown(grammar_ai_tutor_feedback(q, ans_val, was_ok))
-        st.markdown("</div>", unsafe_allow_html=True)
 
     col_prev, col_next, col_score = st.columns([1, 1, 2])
     with col_prev:
@@ -497,13 +535,9 @@ else:
     item_no, three_qs = SPEAKING_15_ITEMS[st.session_state.sp_index]
     st.progress((st.session_state.sp_index + 1) / len(SPEAKING_15_ITEMS), text=f"Set {item_no} of {len(SPEAKING_15_ITEMS)}")
 
-    st.markdown('<div class="speak-card">', unsafe_allow_html=True)
     st.markdown(f'<div class="q-badge">Speaking Set {item_no} • 3 Questions</div>', unsafe_allow_html=True)
-    st.markdown(
-        f"1. **{three_qs[0]}**<br/>2. **{three_qs[1]}**<br/>3. **{three_qs[2]}**",
-        unsafe_allow_html=True,
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    for i, sq in enumerate(three_qs, start=1):
+        st.markdown(f"**{i}. {sq}**")
 
     speaker(" ".join(three_qs), label="🔊 Speak", key_id=f"spk_set_{item_no}")
 
@@ -514,7 +548,7 @@ else:
         key=f"up_voice_{item_no}",
     )
     spoken_words = st.text_area(
-        "Spoken sentences (tap iPhone keyboard 🎤 mic or type what you said for all 3 questions):",
+        "Spoken sentences (optional if using audio with an API key, or type/dictate here):",
         key=f"spoken_words_{item_no}",
         height=90,
         placeholder="Example: My name is Zameer. I am from Tajikistan. I spell it Z-A-M-E-E-R.",
@@ -522,13 +556,14 @@ else:
 
     if st.button("Done", type="primary", key=f"done_{item_no}"):
         active_audio = audio_rec if audio_rec is not None else uploaded_voice
-        has_aud = active_audio is not None
-        aud_len = len(active_audio.getvalue()) if active_audio is not None else 0
-        st.session_state.sp_grades[item_no] = grade_speaking_response(spoken_words, has_aud, aud_len)
+        st.session_state.sp_grades[item_no] = grade_speaking_response(
+            three_qs,
+            spoken_words,
+            active_audio,
+        )
 
     grade = st.session_state.sp_grades.get(item_no)
     if grade:
-        st.markdown('<div class="grade-box">', unsafe_allow_html=True)
         if grade["passed"]:
             st.success(f"✓ CORRECT — Grade: {grade['score_pct']}%")
         else:
@@ -539,7 +574,8 @@ else:
             st.markdown(f"- ✅ {g}")
         for e in grade["errors"]:
             st.markdown(f"- ❌ {e}")
-        st.markdown("</div>", unsafe_allow_html=True)
+        if grade.get("corrected_example"):
+            st.info(f"**Model Answer:** {grade['corrected_example']}")
 
     prev_col, next_col = st.columns(2)
     with prev_col:
