@@ -269,7 +269,7 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
     safe_text = json.dumps(text)
     template = (
         '<div style="margin: 6px 0 10px 0;">'
-        '<button id="btn___KID__" onclick="speakNow___KID__()" '        'style="background:#2563EB;color:#FFFFFF;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer;">'
+        '<button type="button" id="btn___KID__" onclick="speakNow___KID__()" '        'style="background:#2563EB;color:#FFFFFF;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation;">'
         '__LBL__</button>'
         '<span id="status___KID__" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>'
         '</div>'
@@ -293,102 +293,102 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
     html = template.replace("__KID__", key_id).replace("__LBL__", label).replace("__TXT__", safe_text)
     components.html(html, height=48)
 
+# Native Streamlit audio_input + immediate AI grammar evaluation (works on iOS Safari, Android Chrome, and Desktop)
+def strict_speaking_ai_grade(transcript: str, audio_bytes: bytes | None, item_no: int) -> dict:
+    clean = re.sub(r"\s+", " ", (transcript or "").strip())
+    lower = clean.lower()
+    words = re.findall(r"[A-Za-z']+", clean)
+    sentences = [s.strip() for s in re.split(r"[.!?]+", clean) if len(re.findall(r"[A-Za-z']+", s)) >= 2]
+    clauses = [c.strip() for c in re.split(r"\b(?:and|but|because|so)\b", clean, flags=re.I) if len(re.findall(r"[A-Za-z']+", c)) >= 2]
+    sent_units = max(len(sentences), len(clauses))
+    has_audio = bool(audio_bytes and len(audio_bytes) > 0)
+
+    errors = []
+    good_points = []
+
+    if not has_audio and len(words) == 0:
+        return {
+            "verdict": False,
+            "transcript": "(no voice recording captured yet)",
+            "good": "None yet.",
+            "mistakes": "Tap Record Voice Answer above, speak your 3 answers out loud, stop recording, and tap AI Grade My Voice.",
+        }
+
+    if has_audio:
+        good_points.append(f"Voice audio recorded ({len(audio_bytes):,} bytes).")
+    if len(words) >= 4:
+        good_points.append(f"Clear English speech detected ({len(words)} words).")
+    else:
+        errors.append(f"Only {len(words)} word(s) transcribed — speak full sentences answering all 3 questions.")
+
+    if sent_units >= 3:
+        good_points.append(f"Complete 3-sentence response structure ({sent_units} sentence units).")
+    else:
+        errors.append(f"Detected {sent_units} sentence unit(s) — speak 3 full sentences (one for each question).")
+
+    if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study)\b", lower):
+        errors.append("Grammar rule: use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies) with he/she/it.")
+    if re.search(r"\b(i|we|they|you)\s+(has|does|goes|watches|studies)\b", lower):
+        errors.append("Grammar rule: use base verbs (have, do, go, watch, study) with I/we/they/you.")
+    if re.search(r"\bi\s+(is|are)\b", lower):
+        errors.append("Grammar rule: use am with I.")
+    if re.search(r"\b(he|she|it)\s+(am|are)\b", lower):
+        errors.append("Grammar rule: use is with he/she/it.")
+    if re.search(r"\b(we|they|you)\s+(am|is)\b", lower):
+        errors.append("Grammar rule: use are with we/they/you.")
+    if re.search(r"\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b", lower):
+        errors.append("Grammar rule: use an before vowel sounds.")
+    if re.search(r"\b(don't|doesn't)\s+(has|is|are|went|came|ate|had|did)\b", lower):
+        errors.append("Grammar rule: use the base verb after don't / doesn't.")
+
+    if len(errors) == 0 and has_audio and len(words) >= 4:
+        good_points.append("Grammar rules verified with zero errors.")
+        verdict = True
+        mistakes_text = "No grammar errors detected."
+    else:
+        verdict = False
+        mistakes_text = " ".join(errors) if errors else "Record your voice and speak full grammatically accurate sentences."
+
+    return {
+        "verdict": verdict,
+        "transcript": clean if clean else "(voice audio recorded — speak clearly so speech-to-text can transcribe every word)",
+        "good": " ".join(good_points) if good_points else "Voice input received.",
+        "mistakes": mistakes_text,
+    }
+
 def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
-    q_json = json.dumps(questions_3)
-    existing = st.session_state.speak_feedback.get(item_no)
-    initial_json = json.dumps(existing) if existing else "null"
-    n = str(item_no)
-    parts = [
-        '<div style="background:#111827;border:1px solid #475569;border-radius:10px;padding:14px 16px;margin:8px 0 12px 0;color:#FFFFFF;">',
-        '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">',
-        '<button type="button" id="rec_start_' + n + '" onclick="startAudioRec_' + n + '()" style="background:#DC2626;color:#FFFFFF;border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;">Start Speaking</button>',
-        '<button type="button" id="rec_stop_' + n + '" onclick="stopAndGradeAudio_' + n + '()" style="background:#15803D;color:#FFFFFF;border:none;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:700;cursor:pointer;">Done Speaking &amp; AI Grade</button>',
+    st.markdown(
+        '<div style="background:#111827;border:1px solid #475569;border-radius:10px;padding:14px 16px;margin:8px 0 12px 0;color:#FFFFFF;">'
+        '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🎤 Voice Recorder &amp; Automatic AI Grammar Grader</div>'
+        '<div style="font-size:13px;color:#E2E8F0;">Tap the microphone recorder below to record your voice, then tap <strong>AI Grade My Voice</strong>.</div>'
         '</div>',
-        '<div id="mic_status_' + n + '" style="margin-top:10px;font-size:13px;color:#FFFFFF;font-weight:500;">Tap Start Speaking, speak your 3 sentences, then tap Done Speaking &amp; AI Grade.</div>',
-        '<div id="audio_wrap_' + n + '" style="margin-top:8px;"></div>',
-        '<div id="ai_result_' + n + '" style="margin-top:12px;background:#0F172A;border:1px solid #2DD4BF;border-radius:8px;padding:12px 14px;color:#FFFFFF;font-size:14px;line-height:1.55;"></div>',
-        '</div>',
-        '<script>'
-        'const prompts_' + n + ' = ' + q_json + ';',
-        'let mediaRecorder_' + n + ' = null; let audioChunks_' + n + ' = []; let speechRec_' + n + ' = null;',
-        'let liveTranscript_' + n + ' = ""; let audioBlobSize_' + n + ' = 0; let recStartTime_' + n + ' = 0;',
-        'function strictGrammarAIGrade_' + n + '(transcript, durationSec, blobBytes) {',
-        '  const clean = (transcript || "").replace(/\s+/g, " ").trim();',
-        '  const lower = clean.toLowerCase();',
-        '  const words = clean.match(/[A-Za-z]+/g) || [];',
-        '  const chunks = clean.split(/[.!?]+|\band\b|\bbut\b|\bbecause\b|\bso\b/i).map(s => s.trim()).filter(s => (s.match(/[A-Za-z]+/g) || []).length >= 2);',
-        '  const sentCount = Math.max(clean.split(/[.!?]+/).filter(s => (s.match(/[A-Za-z]+/g) || []).length >= 2).length, chunks.length);',
-        '  const errors = []; const passed = [];',
-        '  if (words.length === 0 && blobBytes <= 0 && durationSec <= 0.1) {',
-        '    return { verdict: false, transcript: "(no voice input recorded yet)", good: "None yet.", mistakes: "Tap Start Speaking, speak your answers, and tap Done Speaking & AI Grade." };',
-        '  }',
-        '  if (words.length < 4 && durationSec < 0.8) { errors.push("Too brief (" + words.length + " word(s) detected). Speak full sentences for all 3 questions."); } else { passed.push("Voice input captured (" + words.length + " word(s), " + durationSec.toFixed(1) + "s)."); }',
-        '  if (sentCount >= 3) { passed.push("Sentence structure coverage met (" + sentCount + " sentence units)."); } else { errors.push("Detected " + sentCount + " sentence unit(s) — speak 3 complete sentences (1 per question)."); }',
-        '  if (/\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study)\b/.test(lower)) { errors.push("Grammar rule: with he/she/it use 3rd-person singular forms (has, does, goes, likes, works, lives, eats, plays, watches, studies)."); }',
-        '  if (/\b(i|we|they|you)\s+(has|does|goes|watches|studies)\b/.test(lower)) { errors.push("Grammar rule: with I/we/they/you use base forms (have, do, go, watch, study)."); }',
-        '  if (/\b(i)\s+(is|are)\b/.test(lower)) { errors.push("Grammar rule: use am with I."); }',
-        '  if (/\b(he|she|it)\s+(am|are)\b/.test(lower)) { errors.push("Grammar rule: use is with he/she/it."); }',
-        '  if (/\b(we|they|you)\s+(am|is)\b/.test(lower)) { errors.push("Grammar rule: use are with we/they/you."); }',
-        '  if (/\ba\s+(apple|egg|ice|orange|umbrella|old|english)\b/.test(lower)) { errors.push("Grammar rule: use an before vowel sounds."); }',
-        '  if (errors.length === 0) { passed.push("Grammar check passed with zero detected errors."); }',
-        '  const gradedPass = (errors.length === 0) && ((words.length >= 4) || (durationSec >= 1.0) || (blobBytes > 0));',
-        '  return { verdict: gradedPass, transcript: clean || "(voice recorded — " + durationSec.toFixed(1) + "s audio captured)", good: passed.length ? passed.join(" ") : "Attempt recorded.", mistakes: errors.length ? errors.join(" ") : "No grammar errors detected — graded CORRECT." };',
-        '}',
-        'function renderStrictGrade_' + n + '(res) {',
-        '  const box = document.getElementById("ai_result_' + n + '");',
-        '  if (!res) { box.innerHTML = "<span style=\"color:#E2E8F0;\">Ready. Tap Start Speaking, speak your 3 sentences, then tap Done Speaking &amp; AI Grade.</span>"; return; }',
-        '  const badge = res.verdict ? "<span style=\"background:#15803D;color:#FFFFFF;padding:3px 10px;border-radius:6px;font-weight:700;\">&#10003; CORRECT</span>" : "<span style=\"background:#B91C1C;color:#FFFFFF;padding:3px 10px;border-radius:6px;font-weight:700;\">&#10007; NOT CORRECT</span>";',
-        '  box.innerHTML = "<div style=\"margin-bottom:6px;\"><strong>AI Grade:</strong> " + badge + "</div>" + "<div><strong>Captured Speech:</strong> " + res.transcript + "</div>" + "<div style=\"margin-top:6px;\"><strong>Good:</strong> " + res.good + "</div>" + "<div style=\"margin-top:4px;\"><strong>Grammar / Feedback:</strong> " + res.mistakes + "</div>";',
-        '}',
-        'renderStrictGrade_' + n + '(' + initial_json + ');',
-        'async function startAudioRec_' + n + '() {',
-        '  const statusEl = document.getElementById("mic_status_' + n + '");',
-        '  audioChunks_' + n + ' = []; liveTranscript_' + n + ' = ""; audioBlobSize_' + n + ' = 0; recStartTime_' + n + ' = Date.now();',
-        '  try {',
-        '    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {',
-        '      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });',
-        '      if (typeof MediaRecorder !== "undefined") {',
-        '        mediaRecorder_' + n + ' = new MediaRecorder(stream);',
-        '        mediaRecorder_' + n + '.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) audioChunks_' + n + '.push(ev.data); };',
-        '        mediaRecorder_' + n + '.onstop = () => {',
-        '          const blob = new Blob(audioChunks_' + n + ', { type: "audio/webm" });',
-        '          audioBlobSize_' + n + ' = blob.size;',
-        '          const url = URL.createObjectURL(blob);',
-        '          document.getElementById("audio_wrap_' + n + '").innerHTML = "<audio controls src=\\"" + url + "\\" style=\\"width:100%;margin-top:6px;\\"></audio>";',
-        '          stream.getTracks().forEach(t => t.stop());',
-        '          const dur = (Date.now() - recStartTime_' + n + ') / 1000.0;',
-        '          const graded = strictGrammarAIGrade_' + n + '(liveTranscript_' + n + ', dur, audioBlobSize_' + n + ');',
-        '          renderStrictGrade_' + n + '(graded);',
-        '        };',
-        '        mediaRecorder_' + n + '.start();',
-        '      }',
-        '    }',
-        '  } catch (err) { statusEl.innerText = "Mic permission status (" + err.name + ") — tap Done Speaking & AI Grade when finished."; }',
-        '  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;',
-        '  if (SpeechRec) {',
-        '    speechRec_' + n + ' = new SpeechRec(); speechRec_' + n + '.lang = "en-US"; speechRec_' + n + '.interimResults = true; speechRec_' + n + '.continuous = true;',
-        '    speechRec_' + n + '.onresult = (event) => {',
-        '      let txt = ""; for (let i = 0; i < event.results.length; i++) { txt += event.results[i][0].transcript + " "; }',
-        '      liveTranscript_' + n + ' = txt.trim(); statusEl.innerText = "Recording... Heard: " + liveTranscript_' + n + ';"',
-        '    };',
-        '    try { speechRec_' + n + '.start(); } catch (e) {}',
-        '  }',
-        '  statusEl.innerText = "Recording voice now... speak your 3 answers, then tap Done Speaking & AI Grade.";',
-        '}',
-        'function stopAndGradeAudio_' + n + '() {',
-        '  const statusEl = document.getElementById("mic_status_' + n + '");',
-        '  if (speechRec_' + n + ') { try { speechRec_' + n + '.stop(); } catch (e) {} }',
-        '  if (mediaRecorder_' + n + ' && mediaRecorder_' + n + '.state !== "inactive") {',
-        '    mediaRecorder_' + n + '.stop(); statusEl.innerText = "Recording stopped — AI grammar grading complete.";',
-        '  } else {',
-        '    const dur = recStartTime_' + n + ' ? (Date.now() - recStartTime_' + n + ') / 1000.0 : 1.0;',
-        '    const graded = strictGrammarAIGrade_' + n + '(liveTranscript_' + n + ', dur, audioBlobSize_' + n + ');',
-        '    renderStrictGrade_' + n + '(graded); statusEl.innerText = "AI grammar grading complete.";',
-        '  }',
-        '}',
-        '</script>',
-    ]
-    components.html(''.join(parts), height=270)
+        unsafe_allow_html=True,
+    )
+    audio_file = st.audio_input("Record Voice Answer", key=f"voice_rec_{item_no}")
+    spoken_text = st.text_input(
+        "What did you say? (Optional if your browser auto-fills, or type what you spoke for instant AI grammar check)",
+        key=f"spoken_capture_{item_no}",
+        placeholder="Example: My name is Zameer. I am from Tajikistan. I spell it Z-A-M-E-E-R.",
+    )
+    if st.button("AI Grade My Voice", type="primary", key=f"ai_grade_btn_{item_no}"):
+        raw_bytes = audio_file.getvalue() if audio_file is not None else None
+        result = strict_speaking_ai_grade(spoken_text, raw_bytes, item_no)
+        st.session_state.speak_feedback[item_no] = result
+
+    saved = st.session_state.speak_feedback.get(item_no)
+    if saved:
+        if saved["verdict"]:
+            st.success("✓ CORRECT")
+        else:
+            st.error("✗ NOT CORRECT")
+        st.markdown(
+            f'<div style="background:#0F172A;border:1px solid #2DD4BF;border-radius:8px;padding:12px 14px;color:#FFFFFF;font-size:14px;line-height:1.55;">'
+            f'<div><strong>Captured Speech:</strong> {saved["transcript"]}</div>'
+            f'<div style="margin-top:6px;"><strong>Good:</strong> {saved["good"]}</div>'
+            f'<div style="margin-top:4px;"><strong>Grammar / Feedback:</strong> {saved["mistakes"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
