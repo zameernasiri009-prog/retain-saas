@@ -104,7 +104,7 @@ MCQ_QUESTIONS = [
     {
         "num": 2,
         "type": "Multiple Choice",
-        "prompt": "\"___ is she?\" — \"She's ten.\" And \"___'s he from?\"",
+        "prompt": '"___ is she?\" — \"She\'s ten.\" And \"___\'s he from?\"',
         "pronounce": "How old is she? She is ten. And where is he from?",
         "options": ["A) Where / How old", "B) How old / Where", "C) Who / When"],
         "answer": "B) How old / Where",
@@ -113,7 +113,7 @@ MCQ_QUESTIONS = [
     {
         "num": 3,
         "type": "Multiple Choice",
-        "prompt": "\"Are they Mexican?\" — \"No, they ___.\" And \"We ___ from Canada.\"",
+        "prompt": '"Are they Mexican?\" — \"No, they ___.\" And \"We ___ from Canada.\"',
         "pronounce": "Are they Mexican? No, they are not. And we are from Canada.",
         "options": ["A) aren't / 're", "B) isn't / is", "C) don't / are"],
         "answer": "A) aren't / 're",
@@ -140,7 +140,7 @@ MCQ_QUESTIONS = [
     {
         "num": 6,
         "type": "Multiple Choice",
-        "prompt": "\"What are ___ right here?\" — \"They're keys.\" And \"Who are ___ girls over there?\"",
+        "prompt": '"What are ___ right here?\" — \"They\'re keys.\" And \"Who are ___ girls over there?\"',
         "pronounce": "What are these right here? They are keys. And who are those girls over there?",
         "options": ["A) that / this", "B) these / those", "C) this / that"],
         "answer": "B) these / those",
@@ -171,7 +171,7 @@ MCQ_QUESTIONS = [
     {
         "num": 9,
         "type": "Multiple Choice",
-        "prompt": "\"___ you live near here?\" — \"No, I ___.\" And \"We ___ have meat for dinner.\"",
+        "prompt": '"___ you live near here?\" — \"No, I ___.\" And \"We ___ have meat for dinner.\"',
         "pronounce": "Do you live near here? No, I do not. And we do not have meat for dinner.",
         "options": ["A) Do / don't / don't", "B) Does / doesn't / aren't", "C) Are / 'm not / not"],
         "answer": "A) Do / don't / don't",
@@ -265,18 +265,21 @@ SPEAKING_15_ITEMS = [
     (15, ["What do you have for breakfast?", "What don't you have for lunch?", "What don't they have for dinner?"]),
 ]
 
+
 def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str = "p"):
     safe_text = json.dumps(text)
-    template = (
+    safe_kid = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
+    html = (
         '<div style="margin: 6px 0 10px 0;">'
-        '<button type="button" id="btn___KID__" onclick="speakNow___KID__()" '        'style="background:#2563EB;color:#FFFFFF;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation;">'
-        '__LBL__</button>'
-        '<span id="status___KID__" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>'
+        '<button type="button" id="btn_' + safe_kid + '" onclick="speakNow_' + safe_kid + '()" '
+        'style="background:#2563EB;color:#FFFFFF;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:700;cursor:pointer;">'
+        + label + '</button>'
+        '<span id="status_' + safe_kid + '" style="margin-left:10px;font-size:13px;color:#FFFFFF;font-weight:500;"></span>'
         '</div>'
         '<script>'
-        'function speakNow___KID__() {'
-        '  const phrase = __TXT__;'
-        '  const stEl = document.getElementById("status___KID__");'
+        'function speakNow_' + safe_kid + '() {'
+        '  const phrase = ' + safe_text + ';'
+        '  const stEl = document.getElementById("status_' + safe_kid + '");'
         '  if ("speechSynthesis" in window) {'
         '    window.speechSynthesis.cancel();'
         '    const utter = new SpeechSynthesisUtterance(phrase);'
@@ -290,11 +293,10 @@ def pronounce_button(text: str, label: str = "🔊 Pronunciation", key_id: str =
         '}'
         '</script>'
     )
-    html = template.replace("__KID__", key_id).replace("__LBL__", label).replace("__TXT__", safe_text)
     components.html(html, height=48)
 
-# Native Streamlit audio_input + immediate AI grammar evaluation (works on iOS Safari, Android Chrome, and Desktop)
-def strict_speaking_ai_grade(transcript: str, audio_bytes: bytes | None, item_no: int) -> dict:
+
+def strict_speaking_ai_grade(transcript: str, audio_bytes: bytes | None, click_count: int) -> dict:
     clean = re.sub(r"\s+", " ", (transcript or "").strip())
     lower = clean.lower()
     words = re.findall(r"[A-Za-z']+", clean)
@@ -304,27 +306,27 @@ def strict_speaking_ai_grade(transcript: str, audio_bytes: bytes | None, item_no
     has_audio = bool(audio_bytes and len(audio_bytes) > 0)
 
     errors = []
-    good_points = []
+    good_points = [f"Button click verified (#{click_count})."]
 
     if not has_audio and len(words) == 0:
         return {
             "verdict": False,
-            "transcript": "(no voice recording captured yet)",
-            "good": "None yet.",
-            "mistakes": "Tap Record Voice Answer above, speak your 3 answers out loud, stop recording, and tap AI Grade My Voice.",
+            "transcript": "(no voice audio or spoken text provided yet)",
+            "good": " ".join(good_points),
+            "mistakes": "Tap Record Voice Answer (or upload a voice clip), enter what you spoke, and tap AI Grade My Voice.",
         }
 
     if has_audio:
         good_points.append(f"Voice audio recorded ({len(audio_bytes):,} bytes).")
     if len(words) >= 4:
-        good_points.append(f"Clear English speech detected ({len(words)} words).")
+        good_points.append(f"Spoken text evaluated ({len(words)} words).")
     else:
-        errors.append(f"Only {len(words)} word(s) transcribed — speak full sentences answering all 3 questions.")
+        errors.append(f"Only {len(words)} word(s) provided — speak full sentences for all 3 questions.")
 
     if sent_units >= 3:
-        good_points.append(f"Complete 3-sentence response structure ({sent_units} sentence units).")
+        good_points.append(f"3-sentence structure met ({sent_units} sentence units).")
     else:
-        errors.append(f"Detected {sent_units} sentence unit(s) — speak 3 full sentences (one for each question).")
+        errors.append(f"Detected {sent_units} sentence unit(s) — speak 3 complete sentences (1 per question).")
 
     if re.search(r"\b(he|she|it)\s+(have|do|go|like|work|live|eat|play|watch|study)\b", lower):
         errors.append("Grammar rule: use 3rd-person singular verbs (has, does, goes, likes, works, lives, eats, plays, watches, studies) with he/she/it.")
@@ -342,37 +344,51 @@ def strict_speaking_ai_grade(transcript: str, audio_bytes: bytes | None, item_no
         errors.append("Grammar rule: use the base verb after don't / doesn't.")
 
     if len(errors) == 0 and has_audio and len(words) >= 4:
-        good_points.append("Grammar rules verified with zero errors.")
+        good_points.append("Grammar check passed with zero detected errors.")
         verdict = True
         mistakes_text = "No grammar errors detected."
     else:
         verdict = False
-        mistakes_text = " ".join(errors) if errors else "Record your voice and speak full grammatically accurate sentences."
+        mistakes_text = " ".join(errors) if errors else "Record voice and provide complete grammatically correct sentences."
 
     return {
         "verdict": verdict,
-        "transcript": clean if clean else "(voice audio recorded — speak clearly so speech-to-text can transcribe every word)",
-        "good": " ".join(good_points) if good_points else "Voice input received.",
+        "transcript": clean if clean else "(voice audio recorded — type what you spoke so AI can grade every word)",
+        "good": " ".join(good_points),
         "mistakes": mistakes_text,
     }
+
 
 def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
     st.markdown(
         '<div style="background:#111827;border:1px solid #475569;border-radius:10px;padding:14px 16px;margin:8px 0 12px 0;color:#FFFFFF;">'
-        '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🎤 Voice Recorder &amp; Automatic AI Grammar Grader</div>'
-        '<div style="font-size:13px;color:#E2E8F0;">Tap the microphone recorder below to record your voice, then tap <strong>AI Grade My Voice</strong>.</div>'
+        '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🎤 Voice Recorder &amp; AI Grammar Grader</div>'
+        '<div style="font-size:13px;color:#E2E8F0;">Record your voice (or upload a voice file), type what you spoke, then tap <strong>AI Grade My Voice</strong>.</div>'
         '</div>',
         unsafe_allow_html=True,
     )
-    audio_file = st.audio_input("Record Voice Answer", key=f"voice_rec_{item_no}")
+    audio_file = None
+    if hasattr(st, "audio_input"):
+        audio_file = st.audio_input("Record Voice Answer", key=f"voice_rec_{item_no}")
+    else:
+        st.caption("Your Streamlit version does not include st.audio_input — use the audio file uploader below.")
+
+    uploaded_audio = st.file_uploader(
+        "Or upload a recorded voice clip (WAV, MP3, M4A, OGG, WEBM)",
+        type=["wav", "mp3", "m4a", "ogg", "webm"],
+        key=f"voice_upload_{item_no}",
+    )
     spoken_text = st.text_input(
-        "What did you say? (Optional if your browser auto-fills, or type what you spoke for instant AI grammar check)",
+        "Spoken words for AI grammar grading:",
         key=f"spoken_capture_{item_no}",
         placeholder="Example: My name is Zameer. I am from Tajikistan. I spell it Z-A-M-E-E-R.",
     )
+
     if st.button("AI Grade My Voice", type="primary", key=f"ai_grade_btn_{item_no}"):
-        raw_bytes = audio_file.getvalue() if audio_file is not None else None
-        result = strict_speaking_ai_grade(spoken_text, raw_bytes, item_no)
+        st.session_state.grade_clicks[item_no] = st.session_state.grade_clicks.get(item_no, 0) + 1
+        active_audio = audio_file if audio_file is not None else uploaded_audio
+        raw_bytes = active_audio.getvalue() if active_audio is not None else None
+        result = strict_speaking_ai_grade(spoken_text, raw_bytes, st.session_state.grade_clicks[item_no])
         st.session_state.speak_feedback[item_no] = result
 
     saved = st.session_state.speak_feedback.get(item_no)
@@ -390,10 +406,12 @@ def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
             unsafe_allow_html=True,
         )
 
+
 def normalize_str(s: str) -> str:
     s = re.sub(r"\s+", " ", s.strip().lower())
     s = re.sub(r"\s+([?.!,])", r"\1", s)
     return s
+
 
 def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> str:
     if is_correct:
@@ -416,6 +434,7 @@ def grammar_ai_tutor_feedback(q: dict, user_answer: str, is_correct: bool) -> st
     tips.append(f"- **Grammar rule:** {q['rule']}")
     return "\n".join(tips)
 
+
 if "q_index" not in st.session_state:
     st.session_state.q_index = 0
 if "answers" not in st.session_state:
@@ -426,6 +445,8 @@ if "speak_index" not in st.session_state:
     st.session_state.speak_index = 0
 if "speak_feedback" not in st.session_state:
     st.session_state.speak_feedback = {}
+if "grade_clicks" not in st.session_state:
+    st.session_state.grade_clicks = {}
 
 st.markdown(
     """
