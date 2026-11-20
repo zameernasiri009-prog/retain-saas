@@ -596,7 +596,13 @@ def ai_check_speaking(
 ) -> dict:
     clean_tx = (transcript or "").strip()
 
-    if api_key and clean_tx:
+    if not api_key:
+        res = builtin_grammar_check(questions, clean_tx, has_audio)
+        res["mistakes"].insert(0, "AI check skipped: no API key found in Secrets (check GEMINI_API_KEY).")
+        res["passed"] = False
+        return res
+
+    if clean_tx:
         try:
             from google import genai
 
@@ -631,8 +637,11 @@ def ai_check_speaking(
                 "mistakes": mistakes_list,
                 "better": [str(x) for x in data.get("better", []) if x],
             }
-        except Exception:
-            pass
+        except Exception as e:
+            res = builtin_grammar_check(questions, clean_tx, has_audio)
+            res["mistakes"].insert(0, f"Gemini error (using fallback): {type(e).__name__}: {e}")
+            res["passed"] = False
+            return res
 
     return builtin_grammar_check(questions, clean_tx, has_audio)
 
