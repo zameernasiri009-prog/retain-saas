@@ -328,154 +328,135 @@ def voice_auto_grade_widget(item_no: int, questions_3: list[str]):
     existing = st.session_state.speak_feedback.get(item_no)
     initial_json = json.dumps(existing) if existing else "null"
 
-    html = f"""
-    <div style="
-        background: #111827;
-        border: 1px solid #475569;
-        border-radius: 10px;
-        padding: 14px 16px;
-        margin: 8px 0 12px 0;
-        color: #FFFFFF;
-    ">
-        <button type="button" id="mic_btn_{item_no}" onclick="recordAndGrade_{item_no}()"
-            style="
-                background: #DC2626;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 8px;
-                padding: 11px 20px;
-                font-size: 15px;
-                font-weight: 700;
-                cursor: pointer;
-            ">
-            🎙️ Press &amp; Speak (Auto-AI Grade)
-        </button>
-        <span id="mic_status_{item_no}" style="margin-left: 12px; font-size: 13px; color: #FFFFFF; font-weight: 500;">
-            Tap and speak your 3 sentences
-        </span>
-        <div id="ai_result_{item_no}" style="
-            margin-top: 12px;
-            background: #0F172A;
-            border: 1px solid #2DD4BF;
-            border-radius: 8px;
-            padding: 12px 14px;
-            color: #FFFFFF;
-            font-size: 14px;
-            line-height: 1.5;
-        "></div>
-    </div>
-    <script>
-        const prompts_{item_no} = {q_json};
-
-        function localAIGrade_{item_no}(spokenText) {{
-            const clean = (spokenText || "").replace(/\\s+/g, " ").trim();
-            const words = clean.match(/[A-Za-z']+/g) || [];
-            const parts = clean.split(/[.!?]+|\\band\\b|\\bbut\\b|\\bso\\b/i).map(s => s.trim()).filter(s => s.split(/\\s+/).length >= 2);
-            const sentCount = Math.max(clean.split(/[.!?]+/).filter(s => s.trim()).length, parts.length);
-            const lower = clean.toLowerCase();
-
-            const issues = [];
-            const good = [];
-
-            if (words.length < 4) {{
-                issues.push("Too short to grade clearly. Speak full sentences for all 3 questions.");
-            }} else {{
-                good.push("Spoken clearly (" + words.length + " words captured).");
-            }}
-
-            if (sentCount >= 3) {{
-                good.push("Answered with " + sentCount + " sentence parts across the 3 questions.");
-            }} else {{
-                issues.append("Detected " + sentCount + " sentence part(s) — speak 3 complete sentences (1 per question).");
-            }}
-
-            if (/\\b(he|she|it)\\s+(have|do|go|like|work|live|eat)\\b/.test(lower)) {{
-                issues.push("Use 3rd-person singular verbs with he/she/it (has, does, goes, likes, works, lives, eats).");
-            }}
-            if (/\\b(i|we|they|you)\\s+(has|does|goes)\\b/.test(lower)) {{
-                issues.append("Use base verbs with I/we/they/you (have, do, go).");
-            }}
-            if (/\\ba\\s+(apple|egg|orange|umbrella|old)\\b/.test(lower)) {{
-                issues.append("Use 'an' before a vowel sound.");
-            }}
-
-            if (issues.length === 0) {{
-                good.push("Grammar and structure look strong for beginner speaking.");
-            }}
-
-            const isCorrect = (words.length >= 5) && (sentCount >= 3) && (issues.length === 0);
-            return {{
-                transcript: clean,
-                isCorrect: isCorrect,
-                good: good.join(" "),
-                problems: issues.length ? issues.join(" ") : "No mistakes found — this speaking response is CORRECT."
-            }};
-        }}
-
-        function renderGradeBox_{item_no}(res) {{
-            const box = document.getElementById("ai_result_{item_no}");
-            if (!res) {{
-                box.innerHTML = "<span style='color:#E2E8F0;'>Waiting for your voice... Once you finish speaking, AI grades it automatically.</span>";
-                return;
-            }}
-            const verdictBadge = res.isCorrect
-                ? "<span style='background:#15803D;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;'>✓ CORRECT</span>"
-                : "<span style='background:#B91C1C;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;'>✗ NOT CORRECT</span>";
-
-            const saidText = res.transcript ? res.transcript : "(nothing detected)";
-            box.innerHTML = `
-                <div style="margin-bottom:6px;"><strong>AI Result:</strong> ${verdictBadge}</div>
-                <div><strong>You Said:</strong> ${saidText}</div>
-                <div style="margin-top:6px;"><strong>Good:</strong> ${res.good}</div>
-                <div style="margin-top:4px;"><strong>Feedback / Mistakes:</strong> ${res.problems}</div>
-            `;
-        }}
-
-        renderGradeBox_{item_no}({initial_json});
-
-        function recordAndGrade_{item_no}() {{
-            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const statusEl = document.getElementById("mic_status_{item_no}");
-            if (!SpeechRec) {{
-                statusEl.innerText = "Speech recognition is not available in this browser.";
-                return;
-            }}
-            const rec = new SpeechRec();
-            rec.lang = "en-US";
-            rec.interimResults = true;
-            rec.continuous = true;
-            let finalTranscript = "";
-            let silenceTimer = null;
-
-            statusEl.innerText = "Listening... speak your 3 sentences, then pause briefly to auto-grade.";
-
-            rec.onresult = (event) => {{
-                let full = "";
-                for (let i = 0; i < event.results.length; i++) {{
-                    full += event.results[i][0].transcript + " ";
-                }}
-                finalTranscript = full.trim();
-                clearTimeout(silenceTimer);
-                silenceTimer = setTimeout(() => {{
-                    try {{ rec.stop(); }} catch (e) {{}}
-                }}, 1800);
-            }};
-
-            rec.onerror = (e) => {{
-                statusEl.innerText = "Mic error: " + e.error + ". Tap again to retry.";
-            }};
-
-            rec.onend = () => {{
-                clearTimeout(silenceTimer);
-                const graded = localAIGrade_{item_no}(finalTranscript);
-                renderGradeBox_{item_no}(graded);
-                statusEl.innerText = "Auto-graded by AI.";
-            }};
-
-            rec.start();
-        }}
-    </script>
-    """
+    html = (
+        '<div style="'
+        'background: #111827;'
+        'border: 1px solid #475569;'
+        'border-radius: 10px;'
+        'padding: 14px 16px;'
+        'margin: 8px 0 12px 0;'
+        'color: #FFFFFF;'
+        '">'
+        '<button type="button" id="mic_btn_' + str(item_no) + '" onclick="recordAndGrade_' + str(item_no) + '()" '
+        'style="'
+        'background: #DC2626;'
+        'color: #FFFFFF;'
+        'border: none;'
+        'border-radius: 8px;'
+        'padding: 11px 20px;'
+        'font-size: 15px;'
+        'font-weight: 700;'
+        'cursor: pointer;'
+        '">'
+        '🎙️ Press &amp; Speak (Auto-AI Grade)'
+        '</button>'
+        '<span id="mic_status_' + str(item_no) + '" style="margin-left: 12px; font-size: 13px; color: #FFFFFF; font-weight: 500;">'
+        'Tap and speak your 3 sentences'
+        '</span>'
+        '<div id="ai_result_' + str(item_no) + '" style="'
+        'margin-top: 12px;'
+        'background: #0F172A;'
+        'border: 1px solid #2DD4BF;'
+        'border-radius: 8px;'
+        'padding: 12px 14px;'
+        'color: #FFFFFF;'
+        'font-size: 14px;'
+        'line-height: 1.5;'
+        '"></div>'
+        '</div>'
+        '<script>'
+        'const prompts_' + str(item_no) + ' = ' + q_json + ';'
+        'function localAIGrade_' + str(item_no) + '(spokenText) {'
+        '  const clean = (spokenText || "").replace(/\\s+/g, " ").trim();'
+        '  const words = clean.match(/[A-Za-z]+/g) || [];'
+        '  const parts = clean.split(/[.!?]+|\\band\\b|\\bbut\\b|\\bso\\b/i).map(s => s.trim()).filter(s => s.split(/\\s+/).length >= 2);'
+        '  const sentCount = Math.max(clean.split(/[.!?]+/).filter(s => s.trim()).length, parts.length);'
+        '  const lower = clean.toLowerCase();'
+        '  const issues = [];'
+        '  const good = [];'
+        '  if (words.length < 4) {'
+        '    issues.push("Too short to grade clearly. Speak full sentences for all 3 questions.");'
+        '  } else {'
+        '    good.push("Spoken clearly (" + words.length + " words captured).");'
+        '  }'
+        '  if (sentCount >= 3) {'
+        '    good.push("Answered with " + sentCount + " sentence parts across the 3 questions.");'
+        '  } else {'
+        '    issues.append("Detected " + sentCount + " sentence part(s) — speak 3 complete sentences (1 per question).");'
+        '  }'
+        '  if (/\\b(he|she|it)\\s+(have|do|go|like|work|live|eat)\\b/.test(lower)) {'
+        '    issues.push("Use 3rd-person singular verbs with he/she/it (has, does, goes, likes, works, lives, eats).");'
+        '  }'
+        '  if (/\\b(i|we|they|you)\\s+(has|does|goes)\\b/.test(lower)) {'
+        '    issues.append("Use base verbs with I/we/they/you (have, do, go).");'
+        '  }'
+        '  if (/\\ba\\s+(apple|egg|orange|umbrella|old)\\b/.test(lower)) {'
+        '    issues.append("Use an before a vowel sound.");'
+        '  }'
+        '  if (issues.length === 0) {'
+        '    good.push("Grammar and structure look strong for beginner speaking.");'
+        '  }'
+        '  const isCorrect = (words.length >= 5) && (sentCount >= 3) && (issues.length === 0);'
+        '  return {'
+        '    transcript: clean,'
+        '    isCorrect: isCorrect,'
+        '    good: good.join(" "),'
+        '    problems: issues.length ? issues.join(" ") : "No mistakes found — this speaking response is CORRECT."'
+        '  };'
+        '}'
+        'function renderGradeBox_' + str(item_no) + '(res) {'
+        '  const box = document.getElementById("ai_result_' + str(item_no) + '");'
+        '  if (!res) {'
+        '    box.innerHTML = "<span style=\\"color:#E2E8F0;\\">Waiting for your voice... Once you finish speaking, AI grades it automatically.</span>";'
+        '    return;'
+        '  }'
+        '  const verdictBadge = res.isCorrect'
+        '    ? "<span style=\\"background:#15803D;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;\\">&#10003; CORRECT</span>"'
+        '    : "<span style=\\"background:#B91C1C;color:#FFFFFF;padding:3px 9px;border-radius:6px;font-weight:700;\\">&#10007; NOT CORRECT</span>";'
+        '  const saidText = res.transcript ? res.transcript : "(nothing detected)";'
+        '  box.innerHTML ='
+        '    "<div style=\\"margin-bottom:6px;\\"><strong>AI Result:</strong> " + verdictBadge + "</div>" +'
+        '    "<div><strong>You Said:</strong> " + saidText + "</div>" +'
+        '    "<div style=\\"margin-top:6px;\\"><strong>Good:</strong> " + res.good + "</div>" +'
+        '    "<div style=\\"margin-top:4px;\\"><strong>Feedback / Mistakes:</strong> " + res.problems + "</div>";'
+        '}'
+        'renderGradeBox_' + str(item_no) + '(' + initial_json + ');'
+        'function recordAndGrade_' + str(item_no) + '() {'
+        '  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;'
+        '  const statusEl = document.getElementById("mic_status_' + str(item_no) + '");'
+        '  if (!SpeechRec) {'
+        '    statusEl.innerText = "Speech recognition is not available in this browser.";'
+        '    return;'
+        '  }'
+        '  const rec = new SpeechRec();'
+        '  rec.lang = "en-US";'
+        '  rec.interimResults = true;'
+        '  rec.continuous = true;'
+        '  let finalTranscript = "";'
+        '  let silenceTimer = null;'
+        '  statusEl.innerText = "Listening... speak your 3 sentences, then pause briefly to auto-grade.";'
+        '  rec.onresult = (event) => {'
+        '    let full = "";'
+        '    for (let i = 0; i < event.results.length; i++) {'
+        '      full += event.results[i][0].transcript + " ";'
+        '    }'
+        '    finalTranscript = full.trim();'
+        '    clearTimeout(silenceTimer);'
+        '    silenceTimer = setTimeout(() => { try { rec.stop(); } catch (e) {} }, 1800);'
+        '  };'
+        '  rec.onerror = (e) => {'
+        '    statusEl.innerText = "Mic error: " + e.error + ". Tap again to retry.";'
+        '  };'
+        '  rec.onend = () => {'
+        '    clearTimeout(silenceTimer);'
+        '    const graded = localAIGrade_' + str(item_no) + '(finalTranscript);'
+        '    renderGradeBox_' + str(item_no) + '(graded);'
+        '    statusEl.innerText = "Auto-graded by AI.";'
+        '  };'
+        '  rec.start();'
+        '}'
+        '</script>'
+    )
     components.html(html, height=215)
 
 
