@@ -291,7 +291,7 @@ def listen_button(text: str, key_id: str):
 
 def mic_recorder(key_id: str):
     safe_id = re.sub(r"[^A-Za-z0-9_]", "_", key_id)
-    components.html(
+    return components.html(
         f"""
         <div style="font-family:sans-serif;background:#111827;border:1px solid #334155;border-radius:10px;padding:14px;">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -310,6 +310,14 @@ def mic_recorder(key_id: str):
         let chunks_{safe_id} = [];
         let timerInterval_{safe_id} = null;
         let seconds_{safe_id} = 0;
+
+        function sendToStreamlit_{safe_id}(payloadObj) {{
+            window.parent.postMessage({{
+                isStreamlitMessage: true,
+                type: "streamlit:setComponentValue",
+                value: payloadObj
+            }}, "*");
+        }}
 
         function formatTime_{safe_id}(sec) {{
             const m = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -347,13 +355,26 @@ def mic_recorder(key_id: str):
                 }};
 
                 recorder_{safe_id}.onstop = () => {{
-                    const blob = new Blob(chunks_{safe_id}, {{ type: recorder_{safe_id}.mimeType || "audio/webm" }});
+                    const mimeType = recorder_{safe_id}.mimeType || "audio/webm";
+                    const blob = new Blob(chunks_{safe_id}, {{ type: mimeType }});
                     const url = URL.createObjectURL(blob);
                     player.src = url;
                     player.style.display = "block";
                     if (stream_{safe_id}) {{
                         stream_{safe_id}.getTracks().forEach(t => t.stop());
                     }}
+
+                    const reader = new FileReader();
+                    reader.onloadend = () => {{
+                        const dataUrl = reader.result || "";
+                        const base64Data = dataUrl.includes(",") ? dataUrl.split(",")[1] : "";
+                        sendToStreamlit_{safe_id}({{
+                            base64: base64Data,
+                            mime: mimeType,
+                            name: "recording.webm"
+                        }});
+                    }};
+                    reader.readAsDataURL(blob);
                 }};
 
                 recorder_{safe_id}.start();
@@ -493,6 +514,8 @@ if "sp_index" not in st.session_state:
     st.session_state.sp_index = 0
 if "sp_results" not in st.session_state:
     st.session_state.sp_results = {}
+if "sp_recordings" not in st.session_state:
+    st.session_state.sp_recordings = {}
 
 api_key = get_api_key()
 
@@ -578,23 +601,25 @@ else:
         st.markdown(f"**{i}. {sq}**")
 
     listen_button(three_qs, key_id=f"spk_set_{item_no}")
-    mic_recorder(key_id=f"mic_set_{item_no}")
+    mic_val = mic_recorder(key_id=f"mic_set_{item_no}")
 
-    voice_file = st.audio_input("Voice for Submit", key=f"voice_submit_{item_no}") if hasattr(st, "audio_input") else None
+    if isinstance(mic_val, dict) and mic_val.get("base64"):
+        st.session_state.sp_recordings[item_no] = mic_val
 
     if st.button("Submit", type="primary", key=f"submit_voice_{item_no}"):
-        if voice_file is None:
+        rec = st.session_state.sp_recordings.get(item_no)
+        if not rec or not rec.get("base64"):
             st.session_state.sp_results[item_no] = {
                 "passed": False,
                 "transcript": "(no voice recorded yet)",
                 "correct": [],
-                "mistakes": ["Please record your voice first, then tap Submit."],
+                "mistakes": ["Please record your voice with Mic first, then tap Submit."],
                 "better": [],
             }
         else:
-            raw_bytes = voice_file.getvalue()
-            mime = getattr(voice_file, "type", None) or "audio/wav"
-            fname = getattr(voice_file, "name", None) or "recording.wav"
+            raw_bytes = base64.b64decode(rec["base64"])
+            mime = rec.get("mime") or "audio/webm"
+            fname = rec.get("name") or "recording.webm"
             with st.spinner("AI is checking your voice..."):
                 st.session_state.sp_results[item_no] = ai_check_speaking(
                     three_qs,
